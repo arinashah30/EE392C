@@ -1,0 +1,14 @@
+name: psum_trainium2
+class: sram
+volatile: true
+retention_s: null
+
+access:
+  read_latency_ns: 1
+  write_latency_ns: 1
+  read_energy_pJ_per_bit: 0.04
+  write_energy_pJ_per_bit: 0.04
+
+interface:
+  line_size_bytes: 128
+  max_bandwidth_GBs: 2048

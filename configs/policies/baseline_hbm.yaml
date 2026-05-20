@@ -1,0 +1,10 @@
+name: baseline_hbm
+description: Baseline — persistent tensors live in HBM
+home_level_by_category:
+  weight: hbm
+  kv_cache: hbm
+  hidden: hbm
+  activation: hbm
+  other: hbm
+
+default_access_target: sbuf

@@ -1,0 +1,5 @@
+# https://aws.amazon.com/ec2/instance-types/trn2/
+name: trn2.3xlarge
+num_chips: 1
+cores_per_chip: 8
+hbm_gib_per_chip: 96

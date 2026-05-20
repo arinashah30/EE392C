@@ -1,0 +1,24 @@
+# 3T eDRAM — gain cell, logic-compatible (IBM SOI, 0.18 µm single-supply macro)
+name: edram_3t
+class: edram
+volatile: true
+# Retention: 0.3–2 ms; 0.8 ms worst-case @ 0.18 µm single-supply
+retention_s: 0.0008
+
+# ~2× bit-cell density vs 6T SRAM (~4.9 bits/µm² derived vs 1T1C 4.5× scaling)
+cell_density_bits_per_um2: 4.9
+
+access:
+  # Read: 1.5–2.5 ns (IBM SOI 1.5 ns @ 500 MHz) | Write: 1.3–2.0 ns (non-destructive)
+  read_latency_ns: 2.0
+  write_latency_ns: 1.65
+  read_energy_pJ_per_bit: 1.5
+  write_energy_pJ_per_bit: 1.5
+
+interface:
+  line_size_bytes: 64
+  max_bandwidth_GBs: 350
+
+notes:
+  relative_cost: low-moderate
+  description: logic-compatible CMOS; no dedicated capacitor process

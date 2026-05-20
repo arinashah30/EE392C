@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "metadata": {
+    "workload": "synthetic_llm_decode_step",
+    "source": "handcrafted",
+    "neuron_core_id": 0,
+    "chip_id": 0
+  },
+  "tensors": [
+    {
+      "id": "attn_weights_l0",
+      "name": "layer0.attn.weight",
+      "bytes": 67108864,
+      "category": "weight"
+    },
+    {
+      "id": "kv_cache",
+      "name": "layer0.kv_cache",
+      "bytes": 8388608,
+      "category": "kv_cache"
+    },
+    {
+      "id": "hidden_states",
+      "name": "layer0.hidden",
+      "bytes": 4194304,
+      "category": "hidden"
+    }
+  ],
+  "events": [
+    { "type": "kernel_start", "t_ns": 0, "kernel_id": 1, "core_id": 0 },
+    {
+      "type": "access",
+      "t_ns": 100,
+      "tensor_id": "attn_weights_l0",
+      "op": "read",
+      "bytes": 2097152,
+      "target_level": "sbuf",
+      "core_id": 0
+    },
+    {
+      "type": "access",
+      "t_ns": 200,
+      "tensor_id": "kv_cache",
+      "op": "read",
+      "bytes": 1048576,
+      "target_level": "sbuf",
+      "core_id": 0
+    },
+    {
+      "type": "access",
+      "t_ns": 300,
+      "tensor_id": "hidden_states",
+      "op": "read",
+      "bytes": 524288,
+      "target_level": "sbuf",
+      "core_id": 0
+    },
+    { "type": "kernel_end", "t_ns": 500, "kernel_id": 1, "core_id": 0 },
+    { "type": "kernel_start", "t_ns": 600, "kernel_id": 2, "core_id": 0 },
+    {
+      "type": "access",
+      "t_ns": 700,
+      "tensor_id": "kv_cache",
+      "op": "read",
+      "bytes": 1048576,
+      "target_level": "sbuf",
+      "core_id": 0
+    },
+    {
+      "type": "access",
+      "t_ns": 800,
+      "tensor_id": "attn_weights_l0",
+      "op": "read",
+      "bytes": 2097152,
+      "target_level": "sbuf",
+      "core_id": 0
+    },
+    { "type": "kernel_end", "t_ns": 900, "kernel_id": 2, "core_id": 0 }
+  ]
+}

@@ -1,0 +1,11 @@
+name: decode_tiered
+description: LLM decode placement — weights in LtRAM, KV in StRAM, hidden in StRAM when differentiated
+home_level_by_category:
+  weight: ltram
+  kv_cache: stram
+  hidden: stram
+  activation: stram
+  other: hbm
+
+# Fast levels used for compute-side accesses in traces
+default_access_target: sbuf

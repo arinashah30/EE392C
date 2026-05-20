@@ -1,0 +1,13 @@
+workload: data/traces/synthetic_decode.json
+
+baseline:
+  hierarchy: configs/hierarchy/trainium2_baseline.yaml
+  policy: configs/policies/baseline_hbm.yaml
+
+candidate:
+  hierarchy: configs/hierarchy/trainium2_diff_mem.yaml
+  policy: configs/policies/decode_tiered.yaml
+
+# Example technology swaps (edit hierarchy level tech fields):
+#   levels[2].tech: edram_1t1c | edram_3t
+#   levels[3].tech: rram | feram

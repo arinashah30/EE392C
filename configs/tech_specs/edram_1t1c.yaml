@@ -1,0 +1,26 @@
+# 1T1C eDRAM — trench/stacked capacitor (IBM POWER7 45 nm, IBM 32 nm)
+# Literature ranges in comments; simulator uses midpoint unless noted.
+name: edram_1t1c
+class: edram
+volatile: true
+# Retention: 40–110 µs (requires refresh; IBM 45 nm up to 110 µs @ 99.9% yield)
+# Conservative 40 µs for retention/eviction modeling
+retention_s: 0.00004
+
+# 11 Mbit/mm² → 11 bits/µm² (IBM 32 nm, cell area 0.039 µm²); ~4.5× vs 6T SRAM
+cell_density_bits_per_um2: 11.0
+
+access:
+  # Read: 1.5–2.0 ns | Write: 1.7–2.0 ns (destructive read + write-back ~+30%)
+  read_latency_ns: 1.75
+  write_latency_ns: 1.85
+  read_energy_pJ_per_bit: 1.0
+  write_energy_pJ_per_bit: 1.5
+
+interface:
+  line_size_bytes: 64
+  max_bandwidth_GBs: 400
+
+notes:
+  relative_cost: moderate-high
+  description: trench/stacked capacitor; dedicated capacitor process

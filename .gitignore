@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .venv
+.venv/
 env/
 venv/
 ENV/
@@ -216,3 +217,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- EE392C / dmsim: keep data local, not on GitHub ---
+# Neuron captures (JSON exports are ~600MB/file; NTFF ~40MB/file)
+data/neuron_profile/
+data/traces/neuron_profile_json*/
+*.ntff
+*.neff
+ntrace.pb
+trace_info.pb
+cpu_util.pb
+host_mem.pb
+
+# Generated or downloaded traces (keep only small examples in git)
+data/traces/ingested_*.json
+data/traces/*.json
+!data/traces/synthetic_decode.json
+
+# macOS
+.DS_Store
+**/.DS_Store
