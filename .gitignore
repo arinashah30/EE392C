@@ -234,6 +234,12 @@ data/traces/ingested_*.json
 data/traces/*.json
 !data/traces/synthetic_decode.json
 
+# Large per-run trace bundles: keep only the split parts (each <100MB) and
+# the reassemble script in git; the reconstructed tarball + unpacked dir
+# are local-only.
+data/traces/trn2_48_llama3_1_8b_instruct.tar.gz
+data/traces/trn2_48_llama3_1_8b_instruct/
+
 # macOS
 .DS_Store
 **/.DS_Store
