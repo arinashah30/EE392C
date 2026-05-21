@@ -1,44 +1,93 @@
 #!/usr/bin/env bash
-# Reassemble trn2_48_llama3_1_8b_instruct.tar.gz from its split parts.
+# Reassemble large trace tarballs from their split parts.
 #
-# GitHub blobs are capped at 100 MB so the 200 MB archive was split with
-#   split -b 90M -d --suffix-length=2 <file> <prefix>
-# into part_00, part_01, part_02. This script concatenates them back and
-# (optionally) extracts the directory.
+# GitHub blobs are capped at 100 MB so each archive was split with
+#   split -b 90M -d --suffix-length=2 <file>.tar.gz <file>.tar.gz.part_
+# into part_00, part_01, ... This script concatenates them back, verifies
+# the sha256, and (optionally) extracts the directory.
+#
+# Currently handled archives:
+#   - trn2_48_llama3_1_8b_instruct
+#   - trn2_3_qwen1_5_moe
 #
 # Usage:
-#   ./reassemble.sh              # produces trn2_48_llama3_1_8b_instruct.tar.gz
-#   ./reassemble.sh --extract    # also untars to ./trn2_48_llama3_1_8b_instruct/
+#   ./reassemble.sh                # reassemble all archives
+#   ./reassemble.sh --extract      # also untar each into ./<name>/
+#   ./reassemble.sh <name> [...]   # reassemble only the named archive(s)
+#   ./reassemble.sh --extract <name> [...]
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-OUT="trn2_48_llama3_1_8b_instruct.tar.gz"
-PARTS_DIR="trn2_48_llama3_1_8b_instruct.parts"
-EXPECTED_SHA="14c580aa02fe0488374720cce96ae87081be462d9e11ce7804dce07b8870a90d"
+# name : expected_sha256
+declare -A ARCHIVES=(
+    [trn2_48_llama3_1_8b_instruct]="14c580aa02fe0488374720cce96ae87081be462d9e11ce7804dce07b8870a90d"
+    [trn2_3_qwen1_5_moe]="49480bf6410684ca6f897be055eb7127da77a318e78dde7be90f0b3fc6fe7f1e"
+)
 
-if [[ ! -d "$PARTS_DIR" ]]; then
-    echo "[error] $PARTS_DIR not found next to this script" >&2
-    exit 1
+EXTRACT=0
+SELECTED=()
+for arg in "$@"; do
+    case "$arg" in
+        --extract) EXTRACT=1 ;;
+        -h|--help)
+            sed -n '2,16p' "$0"
+            exit 0
+            ;;
+        *) SELECTED+=("$arg") ;;
+    esac
+done
+
+if [[ ${#SELECTED[@]} -eq 0 ]]; then
+    SELECTED=("${!ARCHIVES[@]}")
 fi
 
-echo "[reassemble] concatenating parts -> $OUT"
-cat "$PARTS_DIR"/trn2_48_llama3_1_8b_instruct.tar.gz.part_?? > "$OUT"
+reassemble_one() {
+    local name="$1"
+    local expected_sha="${ARCHIVES[$name]:-}"
+    local out="${name}.tar.gz"
+    local parts_dir="${name}.parts"
 
-echo "[reassemble] verifying sha256"
-ACTUAL_SHA=$(sha256sum "$OUT" | awk '{print $1}')
-if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
-    echo "[error] sha256 mismatch" >&2
-    echo "        expected: $EXPECTED_SHA" >&2
-    echo "        actual:   $ACTUAL_SHA" >&2
-    exit 1
-fi
-echo "[ok] sha256 matches: $ACTUAL_SHA"
+    if [[ -z "$expected_sha" ]]; then
+        echo "[error] unknown archive: $name" >&2
+        echo "        known: ${!ARCHIVES[*]}" >&2
+        return 1
+    fi
+    if [[ ! -d "$parts_dir" ]]; then
+        echo "[error] $parts_dir not found next to this script" >&2
+        return 1
+    fi
 
-if [[ "${1:-}" == "--extract" ]]; then
-    echo "[reassemble] extracting to ./trn2_48_llama3_1_8b_instruct/"
-    tar -xzf "$OUT"
-    echo "[done] extracted."
-else
+    echo "[reassemble] $name: concatenating parts -> $out"
+    cat "$parts_dir"/"$name".tar.gz.part_?? > "$out"
+
+    echo "[reassemble] $name: verifying sha256"
+    local actual_sha
+    actual_sha=$(sha256sum "$out" | awk '{print $1}')
+    if [[ "$actual_sha" != "$expected_sha" ]]; then
+        echo "[error] sha256 mismatch for $out" >&2
+        echo "        expected: $expected_sha" >&2
+        echo "        actual:   $actual_sha" >&2
+        return 1
+    fi
+    echo "[ok] $name: sha256 matches: $actual_sha"
+
+    if [[ "$EXTRACT" -eq 1 ]]; then
+        echo "[reassemble] $name: extracting to ./$name/"
+        tar -xzf "$out"
+        echo "[done] $name: extracted."
+    fi
+}
+
+rc=0
+for name in "${SELECTED[@]}"; do
+    if ! reassemble_one "$name"; then
+        rc=1
+    fi
+done
+
+if [[ "$EXTRACT" -ne 1 ]]; then
     echo "[done] re-run with --extract to also untar."
 fi
+
+exit "$rc"
