@@ -2,6 +2,8 @@ name: hbm_trainium2
 class: hbm
 volatile: true
 retention_s: null
+# Effective in-plane density for constant-area tradeoffs vs on-die LtRAM
+cell_density_bits_per_um2: 1.1
 
 access:
   read_latency_ns: 120

@@ -1,8 +1,7 @@
-name: trainium2_baseline
-description: Trainium2 per-chip baseline (PSUM + SBUF + HBM only)
+name: trainium2_diff_mem_50sbuf_25hbm
+description: StRAM takes 50% of nominal SBUF capacity per core; LtRAM takes 25% of nominal HBM capacity
 instance: configs/instances/trn2_3xlarge.yaml
 
-# On-chip link bandwidths (analytical model); tune as needed
 links_GBs:
   psum_sbuf: 2048
   sbuf_stram: 800
@@ -23,25 +22,28 @@ levels:
     capacity_bytes: 29360128
 
   - id: stram
-    enabled: false
+    enabled: true
     tech: edram_1t1c
     scope: per_core
-    capacity_bytes: 33554432
+    capacity_bytes: 0
 
   - id: ltram
-    enabled: false
+    enabled: true
     tech: rram
     scope: per_chip
-    capacity_bytes: 1073741824
+    capacity_bytes: 0
 
   - id: hbm
     enabled: true
     tech: hbm_trainium2
     scope: per_chip
-  # capacity filled from instance hbm_gib_per_chip at load time
 
 kernel:
   wipe_levels_on_boundary: [psum, sbuf]
 
 area_budget:
-  enabled: false
+  enabled: true
+  nominal_sbuf_bytes_per_core: 29360128
+  nominal_hbm_gib_per_chip: 96
+  stram_replaces_sbuf_fraction: 0.5
+  ltram_replaces_hbm_fraction: 0.25

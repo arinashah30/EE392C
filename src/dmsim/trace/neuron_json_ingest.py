@@ -14,10 +14,15 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dmsim.trace.classify import classify_tensor
+from dmsim.trace.tensor_name_mapper import (
+    CatalogEntry,
+    NeffTensorCatalog,
+    build_catalog,
+)
 from dmsim.trace.schema import (
     AccessEvent,
     KernelBoundaryEvent,
@@ -36,12 +41,13 @@ _SBUF_LIKE = frozenset({"SB", "SBUF"})
 @dataclass
 class IngestOptions:
     neuron_core_id: int = 0
+    all_cores: bool = True
     model_key: str | None = None
     min_transfer_bytes: int = 64
     aggregate_dma: bool = True
     include_system_tensor_events: bool = False
     kernel_from_layers: bool = True
-    max_access_events: int | None = 50_000
+    max_access_events: int | None = 200_000
 
 
 @dataclass(frozen=True)
@@ -159,13 +165,113 @@ def ingest_neuron_json_profile(
     )
 
 
+def merge_traces(traces: list[Trace]) -> Trace:
+    """Combine per-NeuronCore traces into one chip-level workload."""
+    if not traces:
+        raise ValueError("merge_traces requires at least one trace")
+    if len(traces) == 1:
+        trace = traces[0]
+        if trace.metadata.neuron_core_ids:
+            return trace
+        nc = trace.metadata.neuron_core_id if trace.metadata.neuron_core_id is not None else 0
+        return trace.model_copy(
+            update={"metadata": trace.metadata.model_copy(update={"neuron_core_ids": [nc]})}
+        )
+
+    core_ids = sorted(
+        t.metadata.neuron_core_id if t.metadata.neuron_core_id is not None else 0
+        for t in traces
+    )
+    tensors: dict[str, TensorRecord] = {}
+    events: list[dict] = []
+
+    for trace in traces:
+        nc = trace.metadata.neuron_core_id
+        if nc is None:
+            raise ValueError("each trace must set metadata.neuron_core_id before merge")
+        prefix = f"nc{nc}_"
+        kernel_base = nc * 1_000_000
+
+        for tensor in trace.tensors:
+            tensor_id = f"{prefix}{tensor.id}"
+            tensors[tensor_id] = tensor.model_copy(
+                update={"id": tensor_id, "core_id": nc},
+            )
+
+        for raw in trace.events:
+            event = dict(raw)
+            if event.get("type") == "access":
+                event["tensor_id"] = f"{prefix}{event['tensor_id']}"
+                event["core_id"] = nc
+            elif event.get("type") in ("kernel_start", "kernel_end"):
+                event["kernel_id"] = kernel_base + int(event["kernel_id"])
+                event["core_id"] = nc
+            events.append(event)
+
+    events.sort(key=lambda event: event.get("t_ns", 0))
+    profile_dir = traces[0].metadata.source.replace("neuron_json:", "")
+    return Trace(
+        metadata=TraceMetadata(
+            workload=f"chip_cores_{'_'.join(str(c) for c in core_ids)}",
+            source=f"neuron_json:{profile_dir}",
+            neuron_core_ids=core_ids,
+            neuron_core_id=None,
+        ),
+        tensors=list(tensors.values()),
+        events=events,
+    )
+
+
+def ingest_all_neuron_cores(
+    profile_dir: Path,
+    *,
+    options: IngestOptions | None = None,
+) -> Trace:
+    opts = options or IngestOptions()
+    profile_dir = discover_profile_dir(profile_dir)
+    cores = list_neuron_cores(profile_dir)
+    if not cores:
+        raise FileNotFoundError(f"No NeuronCores listed in {profile_dir}/profile.json")
+
+    per_core_cap: int | None = None
+    if opts.max_access_events:
+        per_core_cap = max(5000, opts.max_access_events // len(cores))
+
+    traces: list[Trace] = []
+    for nc in cores:
+        core_opts = replace(
+            opts,
+            neuron_core_id=nc,
+            all_cores=False,
+            max_access_events=per_core_cap,
+        )
+        traces.append(ingest_neuron_json_profile(profile_dir, options=core_opts))
+    merged = merge_traces(traces)
+    if opts.max_access_events and len(merged.events) > opts.max_access_events:
+        merged = merged.model_copy(
+            update={"events": _downsample_events(merged.events, opts.max_access_events)},
+        )
+    return merged
+
+
+def ingest_profile(
+    profile_dir: Path,
+    *,
+    options: IngestOptions | None = None,
+) -> Trace:
+    opts = options or IngestOptions()
+    if opts.all_cores:
+        return ingest_all_neuron_cores(profile_dir, options=opts)
+    return ingest_neuron_json_profile(profile_dir, options=opts)
+
+
 def ingest_and_write(
     profile_dir: Path,
     output_path: Path,
     *,
     options: IngestOptions | None = None,
 ) -> Trace:
-    trace = ingest_neuron_json_profile(profile_dir, options=options)
+    trace = ingest_profile(profile_dir, options=options)
     write_trace(trace, output_path)
     return trace
 
@@ -201,6 +307,7 @@ def _dma_route(dma: dict) -> tuple[str, str]:
 
 
 def _classify_variable(name: str) -> TensorCategory:
+    """Fallback when NEFF catalog / mapper cannot resolve a DMA variable."""
     lowered = name.lower()
     if any(token in lowered for token in ("weight", "kernel", "param")):
         return TensorCategory.WEIGHT
@@ -213,8 +320,60 @@ def _classify_variable(name: str) -> TensorCategory:
     return classify_tensor(name)
 
 
+def _seed_catalog_tensors(
+    catalog: NeffTensorCatalog,
+    tensors: dict[str, TensorRecord],
+) -> None:
+    for entry in catalog.entries():
+        record = _tensor_record_from_entry(entry)
+        existing = tensors.get(record.id)
+        if existing is None or record.bytes > existing.bytes:
+            tensors[record.id] = record
+
+
+def _tensor_record_from_entry(entry: CatalogEntry) -> TensorRecord:
+    return TensorRecord(
+        id=entry.tensor_id,
+        name=entry.semantic_name or entry.variable_name,
+        bytes=entry.bytes,
+        category=entry.category,
+    )
+
+
+def _resolve_dma_tensor(
+    catalog: NeffTensorCatalog,
+    variable: str,
+    transfer_bytes: int,
+    *,
+    src: str,
+    dst: str,
+    read_shape: object = None,
+) -> TensorRecord:
+    resolved = catalog.resolve_dma(
+        variable,
+        transfer_bytes,
+        src=src,
+        dst=dst,
+        read_shape=read_shape,
+    )
+    if resolved is not None:
+        record = _tensor_record_from_entry(resolved)
+        record = record.model_copy(
+            update={"bytes": max(record.bytes, transfer_bytes)},
+        )
+        return record
+    return TensorRecord(
+        id=_tensor_id(variable),
+        name=variable,
+        bytes=transfer_bytes,
+        category=_classify_variable(variable),
+    )
+
+
 def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str, TensorRecord], list[AccessEvent]]:
+    catalog = build_catalog(device)
     tensors: dict[str, TensorRecord] = {}
+    _seed_catalog_tensors(catalog, tensors)
     accesses: list[AccessEvent] = []
     buckets: dict[_AggKey, _AggBucket] = defaultdict(_AggBucket)
 
@@ -228,12 +387,16 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
             continue
         op, target_level = op_target
         variable = str(dma.get("variable") or dma.get("tensor_name") or "unknown")
-        tensor_id = _tensor_id(variable)
-        tensors[tensor_id] = TensorRecord(
-            id=tensor_id,
-            name=variable,
-            bytes=max(tensors.get(tensor_id, TensorRecord(id=tensor_id, name=variable, bytes=0)).bytes, transfer),
-            category=_classify_variable(variable),
+        record = _resolve_dma_tensor(
+            catalog,
+            variable,
+            transfer,
+            src=src,
+            dst=dst,
+            read_shape=dma.get("read_shape"),
+        )
+        tensors[record.id] = record.model_copy(
+            update={"bytes": max(tensors.get(record.id, record).bytes, transfer)},
         )
         ts = int(dma.get("timestamp") or 0)
         route = f"{src}->{dst}"
@@ -249,7 +412,7 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
             accesses.append(
                 AccessEvent(
                     t_ns=_device_ts_to_ns(ts),
-                    tensor_id=tensor_id,
+                    tensor_id=record.id,
                     op=op,
                     bytes=transfer,
                     target_level=target_level,
@@ -259,20 +422,23 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
 
     if opts.aggregate_dma:
         for key, bucket in buckets.items():
-            tensor_id = _tensor_id(key.variable)
-            tensors[tensor_id] = TensorRecord(
-                id=tensor_id,
-                name=key.variable,
-                bytes=max(tensors.get(tensor_id, TensorRecord(id=tensor_id, name=key.variable, bytes=0)).bytes, bucket.bytes),
-                category=_classify_variable(key.variable),
-            )
             src, dst = key.route.split("->", 1)
+            record = _resolve_dma_tensor(
+                catalog,
+                key.variable,
+                bucket.bytes,
+                src=src,
+                dst=dst,
+            )
+            tensors[record.id] = record.model_copy(
+                update={"bytes": max(tensors.get(record.id, record).bytes, bucket.bytes)},
+            )
             mapped = _map_dma_to_access(src, dst)
             target_level = mapped[1] if mapped else "sbuf"
             accesses.append(
                 AccessEvent(
                     t_ns=_device_ts_to_ns(bucket.first_ts),
-                    tensor_id=tensor_id,
+                    tensor_id=record.id,
                     op=key.op,  # type: ignore[arg-type]
                     bytes=bucket.bytes,
                     target_level=target_level,
@@ -284,13 +450,18 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
         if "load_to_sbuf" not in json.dumps(ann):
             continue
         name = str(ann.get("tensor_name") or ann.get("name") or "unknown")
-        tensor_id = _tensor_id(name)
         size = int(ann.get("tensor_size_bytes") or ann.get("load_to_sbuf_total_size_bytes") or 0)
-        tensors[tensor_id] = TensorRecord(
-            id=tensor_id,
-            name=name,
-            bytes=max(tensors.get(tensor_id, TensorRecord(id=tensor_id, name=name, bytes=0)).bytes, size),
-            category=_classify_variable(name),
+        if name in catalog.by_variable:
+            record = _tensor_record_from_entry(catalog.by_variable[name])
+        else:
+            record = TensorRecord(
+                id=_tensor_id(name),
+                name=name,
+                bytes=size,
+                category=_classify_variable(name),
+            )
+        tensors[record.id] = record.model_copy(
+            update={"bytes": max(tensors.get(record.id, record).bytes, size)},
         )
 
     return tensors, accesses

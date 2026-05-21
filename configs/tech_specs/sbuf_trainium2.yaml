@@ -2,6 +2,8 @@ name: sbuf_trainium2
 class: sram
 volatile: true
 retention_s: null
+# ~6T SRAM equivalent density for area-budget tradeoffs vs eDRAM/NVM
+cell_density_bits_per_um2: 2.44
 
 access:
   read_latency_ns: 1

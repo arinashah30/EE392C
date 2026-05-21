@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from dmsim.config.area_budget import apply_area_budget
 from dmsim.config.models import (
     HierarchyConfig,
     InstanceSpec,
@@ -47,11 +48,23 @@ def load_policy(path: Path) -> PolicyConfig:
     return PolicyConfig.model_validate(data)
 
 
+def _capacity_set_by_area_budget(config: HierarchyConfig, level_id: str) -> bool:
+    if not config.area_budget.enabled:
+        return False
+    budget = config.area_budget
+    if level_id == "stram" and budget.stram_replaces_sbuf_fraction is not None:
+        return True
+    if level_id == "ltram" and budget.ltram_replaces_hbm_fraction is not None:
+        return True
+    return False
+
+
 def load_hierarchy(
     path: Path,
     *,
     repo_root: Path | None = None,
     tech_dir: Path | None = None,
+    num_cores: int | None = None,
 ) -> ResolvedHierarchy:
     root = repo_root or _repo_root(path.parent)
     tech_root = tech_dir or (root / "configs" / "tech_specs")
@@ -89,7 +102,9 @@ def load_hierarchy(
         if level.id == "hbm":
             capacity = hbm_bytes
 
-        if capacity is None or capacity <= 0:
+        if capacity is None:
+            raise ValueError(f"level {level.id} requires capacity_bytes or HBM instance spec")
+        if capacity <= 0 and not _capacity_set_by_area_budget(config, level.id):
             raise ValueError(f"level {level.id} requires capacity_bytes or HBM instance spec")
 
         resolved.append(
@@ -104,12 +119,17 @@ def load_hierarchy(
         )
         enabled_index += 1
 
-    return ResolvedHierarchy(
+    cores = num_cores if num_cores is not None else instance.cores_per_chip
+
+    hierarchy = ResolvedHierarchy(
         name=config.name,
         instance=instance,
         levels=resolved,
         links_GBs=config.links_GBs,
         kernel=config.kernel,
+        area_budget=config.area_budget,
         tech_dir=tech_root,
         repo_root=root,
     )
+    apply_area_budget(hierarchy, config.area_budget, num_cores=cores)
+    return hierarchy

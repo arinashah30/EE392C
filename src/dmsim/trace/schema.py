@@ -54,7 +54,16 @@ class TraceMetadata(BaseModel):
     workload: str = ""
     source: str = ""
     neuron_core_id: int | None = None
+    neuron_core_ids: list[int] = Field(default_factory=list)
     chip_id: int = 0
+
+    @property
+    def num_neuron_cores(self) -> int:
+        if self.neuron_core_ids:
+            return len(self.neuron_core_ids)
+        if self.neuron_core_id is not None:
+            return 1
+        return 1
 
 
 class Trace(BaseModel):

@@ -9,8 +9,8 @@ from dmsim.sim.transfer import (
     access_energy_pJ,
     access_latency_ns,
     path_between,
-    transfer_energy_pJ,
-    transfer_latency_ns,
+    transfer_energy_between_levels,
+    transfer_latency_between_levels,
 )
 from dmsim.trace.schema import (
     AccessEvent,
@@ -61,6 +61,9 @@ def run_simulation(
     }
 
     fast_buffers: dict[int, dict[str, FastBufferState]] = {}
+    _seed_home_allocations(
+        tensor_map, homes, hierarchy, residency, fast_buffers, pools
+    )
 
     result = SimulationResult(
         hierarchy_name=hierarchy.name,
@@ -87,6 +90,33 @@ def run_simulation(
             )
 
     return result
+
+
+def _seed_home_allocations(
+    tensor_map: dict,
+    homes: dict[str, str],
+    hierarchy: ResolvedHierarchy,
+    residency: dict[str, TensorResidency],
+    fast_buffers: dict[int, dict[str, FastBufferState]],
+    pools: dict[str, LevelPoolState],
+) -> None:
+    """Reserve capacity for tensors homed in persistent per-core levels (e.g. StRAM)."""
+    for tensor_id, home_level in homes.items():
+        level = hierarchy.level_by_id(home_level)
+        if level.scope != "per_core" or home_level in hierarchy.kernel.wipe_levels_on_boundary:
+            continue
+        tensor = tensor_map[tensor_id]
+        core_id = tensor.core_id if tensor.core_id is not None else 0
+        _install_in_fast_buffer(
+            hierarchy,
+            fast_buffers,
+            core_id,
+            home_level,
+            tensor_id,
+            tensor.bytes,
+            pools,
+        )
+        residency[tensor_id].resident_level = home_level
 
 
 def _fast_buffer(
@@ -162,6 +192,7 @@ def _handle_access(
             nbytes,
             result,
             count_hbm=True,
+            home_id=state.home_level,
         )
         state.corrupt = False
         state.resident_level = state.home_level
@@ -176,6 +207,7 @@ def _handle_access(
             nbytes,
             result,
             count_hbm=True,
+            home_id=state.home_level,
         )
         _install_in_fast_buffer(
             hierarchy, fast_buffers, core_id, target, event.tensor_id, nbytes, pools
@@ -223,14 +255,15 @@ def _charge_path(
     result: SimulationResult,
     *,
     count_hbm: bool,
+    home_id: str,
 ) -> None:
     if source_id == dest_id:
         return
-    for hop_from, hop_to in path_between(hierarchy, source_id, dest_id):
-        from_level = hierarchy.level_by_id(hop_from)
-        to_level = hierarchy.level_by_id(hop_to)
-        lat = transfer_latency_ns(hierarchy, from_level, to_level, nbytes)
-        eng = transfer_energy_pJ(hierarchy, from_level, to_level, nbytes)
+    for hop_from, hop_to in path_between(
+        hierarchy, source_id, dest_id, home_id=home_id
+    ):
+        lat = transfer_latency_between_levels(hierarchy, hop_from, hop_to, nbytes)
+        eng = transfer_energy_between_levels(hierarchy, hop_from, hop_to, nbytes)
         result.total_time_ns += lat
         result.total_energy_pJ += eng
         hop_key = f"{hop_from}->{hop_to}"

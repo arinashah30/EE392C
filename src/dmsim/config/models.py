@@ -49,6 +49,19 @@ class KernelConfig(BaseModel):
     wipe_levels_on_boundary: list[str] = Field(default_factory=lambda: ["psum", "sbuf"])
 
 
+class AreaBudgetConfig(BaseModel):
+    """Trade StRAM area against SBUF and LtRAM area against HBM at constant die area."""
+
+    enabled: bool = True
+    nominal_sbuf_bytes_per_core: int | None = None
+    nominal_hbm_gib_per_chip: float | None = None
+    sbuf_reference_density_bits_per_um2: float = 2.44
+    hbm_reference_density_bits_per_um2: float = 1.1
+    # If set (0–1), size StRAM/LtRAM from fractions of nominal SBUF/HBM area.
+    stram_replaces_sbuf_fraction: float | None = None
+    ltram_replaces_hbm_fraction: float | None = None
+
+
 class HierarchyConfig(BaseModel):
     name: str
     description: str | None = None
@@ -56,6 +69,7 @@ class HierarchyConfig(BaseModel):
     links_GBs: dict[str, float] = Field(default_factory=dict)
     levels: list[LevelConfig]
     kernel: KernelConfig = Field(default_factory=KernelConfig)
+    area_budget: AreaBudgetConfig = Field(default_factory=AreaBudgetConfig)
 
     @field_validator("levels")
     @classmethod
@@ -91,6 +105,8 @@ class ResolvedHierarchy(BaseModel):
     levels: list[ResolvedLevel]
     links_GBs: dict[str, float]
     kernel: KernelConfig
+    area_budget: AreaBudgetConfig
+    area_budget_notes: dict[str, str] = Field(default_factory=dict)
     tech_dir: Path
     repo_root: Path
 

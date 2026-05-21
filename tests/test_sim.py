@@ -25,7 +25,9 @@ def trace() -> Trace:
 
 
 def test_baseline_runs(trace: Trace) -> None:
-    hierarchy = load_hierarchy(ROOT / "configs/hierarchy/trainium2_baseline.yaml")
+    hierarchy = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
+    )
     policy = load_policy(ROOT / "configs/policies/baseline_hbm.yaml")
     result = run_simulation(trace, hierarchy, policy)
     assert result.total_time_ns > 0
@@ -33,8 +35,12 @@ def test_baseline_runs(trace: Trace) -> None:
 
 
 def test_diff_mem_reduces_hbm_traffic(trace: Trace) -> None:
-    baseline_h = load_hierarchy(ROOT / "configs/hierarchy/trainium2_baseline.yaml")
-    diff_h = load_hierarchy(ROOT / "configs/hierarchy/trainium2_diff_mem.yaml")
+    baseline_h = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
+    )
+    diff_h = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
+    )
     baseline_p = load_policy(ROOT / "configs/policies/baseline_hbm.yaml")
     diff_p = load_policy(ROOT / "configs/policies/decode_tiered.yaml")
 
@@ -44,7 +50,9 @@ def test_diff_mem_reduces_hbm_traffic(trace: Trace) -> None:
 
 
 def test_retention_corrupts_stale_stram() -> None:
-    hierarchy = load_hierarchy(ROOT / "configs/hierarchy/trainium2_diff_mem.yaml")
+    hierarchy = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
+    )
     policy = load_policy(ROOT / "configs/policies/decode_tiered.yaml")
     trace = Trace(
         metadata=TraceMetadata(workload="retention_test"),
@@ -79,7 +87,40 @@ def test_retention_corrupts_stale_stram() -> None:
 
 
 def test_kernel_wipe_forces_reload(trace: Trace) -> None:
-    hierarchy = load_hierarchy(ROOT / "configs/hierarchy/trainium2_baseline.yaml")
+    hierarchy = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
+    )
     policy = load_policy(ROOT / "configs/policies/baseline_hbm.yaml")
     result = run_simulation(trace, hierarchy, policy)
     assert result.kernel_wipes >= 1
+
+
+def test_hbm_homed_access_skips_stram_ltram_hop_keys() -> None:
+    hierarchy = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
+    )
+    policy = load_policy(ROOT / "configs/policies/baseline_hbm.yaml")
+    trace = Trace(
+        metadata=TraceMetadata(workload="hbm_direct"),
+        tensors=[
+            TensorRecord(
+                id="w",
+                name="weight",
+                bytes=8192,
+                category=TensorCategory.WEIGHT,
+            )
+        ],
+        events=[
+            AccessEvent(
+                t_ns=0,
+                tensor_id="w",
+                op="read",
+                bytes=8192,
+                target_level="sbuf",
+            ).model_dump(),
+        ],
+    )
+    result = run_simulation(trace, hierarchy, policy)
+    assert "hbm->sbuf" in result.transfers_by_hop
+    assert "hbm->ltram" not in result.transfers_by_hop
+    assert "ltram->stram" not in result.transfers_by_hop

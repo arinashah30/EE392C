@@ -14,10 +14,12 @@ Closest to compute → farthest:
 
 ### Instances
 
-| Instance | Chips | Sim scope |
-|----------|-------|-----------|
-| `trn2.3xlarge` | 1 | Default (`configs/instances/trn2_3xlarge.yaml`) |
-| `trn2.48xlarge` | 16 | Set `instance: configs/instances/trn2_48xlarge.yaml` in hierarchy |
+
+| Instance        | Chips | Sim scope                                                         |
+| --------------- | ----- | ----------------------------------------------------------------- |
+| `trn2.3xlarge`  | 1     | Default (`configs/instances/trn2_3xlarge.yaml`)                   |
+| `trn2.48xlarge` | 16    | Set `instance: configs/instances/trn2_48xlarge.yaml` in hierarchy |
+
 
 Simulation runs **per chip**; multi-chip studies scale HBM pools via instance config later.
 
@@ -68,26 +70,33 @@ Disable a level:
 
 **Use the Neuron Explorer JSON export** (`profile.json` + per-core `*_nc_*_session_*.json`), not the raw NEFF/NTFF bundle, as your primary input.
 
-| | JSON export | Raw NEFF/NTFF |
-|---|-------------|---------------|
-| Parsing | Standard `json` | Protobuf + NEFF toolchain |
-| DMA / tensor detail | `dma[]`, `annotation`, `layer_summary` | NTFF (~40MB/core) |
-| Ingest | **`dmsim ingest`** | Stub only |
+
+|                     | JSON export                            | Raw NEFF/NTFF             |
+| ------------------- | -------------------------------------- | ------------------------- |
+| Parsing             | Standard `json`                        | Protobuf + NEFF toolchain |
+| DMA / tensor detail | `dma[]`, `annotation`, `layer_summary` | NTFF (~40MB/core)         |
+| Ingest              | `**dmsim ingest`**                     | Stub only                 |
+
 
 Keep NEFF/NTFF for Neuron Explorer UI; run the simulator on ingested traces.
 
 ```bash
+# Ingest all NeuronCores in the profile (default)
 dmsim ingest \
   --profile-dir data/traces/neuron_profile_json_4-19 \
-  --nc 0 --model-key 124050204400345 \
-  --output data/traces/ingested_nc0.json
+  --model-key 124050204400345 \
+  --output data/traces/ingested_all_cores.json
 
+# Full pipeline: ingest all cores → baseline vs StRAM/LtRAM (constant area)
 dmsim pipeline \
   --profile-dir data/traces/neuron_profile_json_4-19 \
-  --hierarchy configs/hierarchy/trainium2_diff_mem.yaml \
-  --policy configs/policies/decode_tiered.yaml \
-  --nc 0 --model-key 124050204400345
+  --model-key 124050204400345 \
+  --baseline-hierarchy configs/hierarchy/trainium2_baseline.yaml \
+  --candidate-hierarchy configs/hierarchy/trainium2_diff_mem.yaml \
+  --output data/traces/sim_results_all_cores.json
 ```
+
+**Constant-area tradeoffs** (`trainium2_diff_mem.yaml`): **StRAM is per NeuronCore** — each core's StRAM area is subtracted from that core's SBUF (not split across the chip). LtRAM remains per-chip and trades against HBM. Densities come from `configs/tech_specs/`.
 
 Details: [docs/NEURON_PROFILE.md](docs/NEURON_PROFILE.md).
 
@@ -129,10 +138,12 @@ experiments/      # experiment descriptors
 
 `configs/policies/decode_tiered.yaml`:
 
+
 | Category | Home level (differentiated) |
-|----------|----------------------------|
-| weight | LtRAM |
-| kv_cache | StRAM |
-| hidden | StRAM |
+| -------- | --------------------------- |
+| weight   | LtRAM                       |
+| kv_cache | StRAM                       |
+| hidden   | StRAM                       |
+
 
 Baseline policy keeps all categories in HBM.
