@@ -167,13 +167,23 @@ class LLaMANameMapper:
 
     @staticmethod
     def _is_kv_cache_shape(shape: Tuple[int, ...]) -> bool:
-        """True for attention KV tensors, not compiler 4D temporaries."""
-        if len(shape) != 4:
-            return False
-        if shape[2] == 1 and shape[3] == 1:
-            return False
-        _batch, _seq, n_heads, head_dim = shape
-        return n_heads <= 16 and head_dim in (64, 128)
+        """True for attention KV tensors, not compiler temporaries.
+
+        Supports common layouts seen in Neuron profiles:
+        - 4D: (batch, seq, n_kv_heads, head_dim)
+        - 5D: (batch, seq, n_kv_heads, 2, head_dim) where the 2 packs K/V
+        """
+        if len(shape) == 4:
+            if shape[2] == 1 and shape[3] == 1:
+                return False
+            _batch, _seq, n_heads, head_dim = shape
+            return n_heads <= 16 and head_dim in (64, 128)
+        if len(shape) == 5:
+            _batch, _seq, n_heads, kv_pack, head_dim = shape
+            if kv_pack != 2:
+                return False
+            return n_heads <= 16 and head_dim in (64, 128)
+        return False
     
     def map_tensor(self, var_name: str, shape_str: str, tensor_type: str) -> SemanticTensorInfo:
         """
@@ -252,6 +262,24 @@ class LLaMANameMapper:
                 description="Attention mask for padding/causal",
                 shape_description="(batch, seq_len)"
             )
+
+        # Heuristic KV detection: some exports use higher input indices and/or 5D packed shapes.
+        if shape and self._is_kv_cache_shape(shape):
+            # Prefer stable semantic names even when the input index doesn't match the
+            # "input3..input(3+2*n_layers)" convention.
+            shape_desc = (
+                "(batch, seq_len, n_kv_heads, head_dim)"
+                if len(shape) == 4
+                else "(batch, seq_len, n_kv_heads, {k,v}, head_dim)"
+            )
+            return SemanticTensorInfo(
+                semantic_name=f"{var_name}_kv_cache",
+                category=self.CATEGORY_KV_CACHE,
+                layer_index=-1,
+                component="kv_cache",
+                description="KV cache (shape-detected)",
+                shape_description=shape_desc,
+            )
         
         # KV Cache (input3 to input3 + 2*n_layers - 1)
         kv_start = 3
@@ -319,8 +347,19 @@ class LLaMANameMapper:
                 shape_description="(hidden_size,)"
             )
         
-        # Fallback based on shape
-        return self._infer_from_shape(var_name, shape_str, shape)
+        # Fallback based on shape. If the mapper still cannot recognize this input
+        # but it has a high-rank activation-like shape, classify it as activation.
+        inferred = self._infer_from_shape(var_name, shape_str, shape)
+        if inferred.category == self.CATEGORY_UNKNOWN and shape and len(shape) >= 5:
+            return SemanticTensorInfo(
+                semantic_name=f"{var_name}_activation",
+                category=self.CATEGORY_RUNTIME,
+                layer_index=-1,
+                component="activation",
+                description="Intermediate activation (shape-detected)",
+                shape_description=shape_str or "(activation)",
+            )
+        return inferred
     
     def _map_layer_weight(self, layer_idx: int, offset: int, shape_str: str) -> SemanticTensorInfo:
         """Map a per-layer weight based on offset within the layer."""

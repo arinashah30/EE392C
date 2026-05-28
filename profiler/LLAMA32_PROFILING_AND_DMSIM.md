@@ -19,7 +19,7 @@ See also: [NEURON_PROFILE.md](NEURON_PROFILE.md) (JSON format and DMA ingest det
 
 **This is the supported workflow.** It compiles (optional), runs inference with Neuron inspect enabled, and exports Explorer JSON.
 
-It calls `profiler/run_llama32_1b_trn2.py`, which uses **`neuronx_distributed_inference.inference_demo`** (`NeuronLlamaForCausalLM`).
+It calls `profiler/run_llama32_1b_trn2.py`, which uses `**neuronx_distributed_inference.inference_demo`** (`NeuronLlamaForCausalLM`).
 
 ```bash
 source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
@@ -41,24 +41,28 @@ PROMPT="I believe the meaning of life is" ./capture_and_export.sh
 
 **Environment variables** (optional overrides):
 
-| Variable | Default |
-|----------|---------|
-| `MODEL_PATH` | `/dev/shm/Llama-3.2-1B-Instruct` |
-| `TRACED` | `/dev/shm/traced_model/Llama-3.2-1B-Instruct-nxdi-lnc1-tp4-b1-ctx128-seq256` |
-| `OUT` | `$TRACED/profile` |
-| `LNC` | `1` |
-| `TP_DEGREE` | `4` |
-| `COMPILE` | `0` (set `COMPILE=1` to compile first) |
-| `SKIP_RUN` | `0` (set `SKIP_RUN=1` to re-export JSON from existing NTFFs) |
+
+| Variable            | Default                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `MODEL_PATH`        | `/dev/shm/Llama-3.2-1B-Instruct`                                                            |
+| `TRACED`            | `/dev/shm/traced_model/Llama-3.2-1B-Instruct-nxdi-lnc1-tp4-b1-ctx128-seq256`                |
+| `OUT`               | `$TRACED/profile`                                                                           |
+| `LNC`               | `1`                                                                                         |
+| `TP_DEGREE`         | `4`                                                                                         |
+| `COMPILE`           | `0` (set `COMPILE=1` to compile first)                                                      |
+| `SKIP_RUN`          | `0` (set `SKIP_RUN=1` to re-export JSON from existing NTFFs)                                |
 | `ENABLE_DGE_NOTIFS` | `0` (set `1` to set `NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1` for richer dynamic DMA metadata) |
+
 
 **Artifacts:**
 
-| Item | Path |
-|------|------|
-| HF weights | `/dev/shm/Llama-3.2-1B-Instruct` |
+
+| Item                | Path                                                                          |
+| ------------------- | ----------------------------------------------------------------------------- |
+| HF weights          | `/dev/shm/Llama-3.2-1B-Instruct`                                              |
 | NXDI compiled model | `/dev/shm/traced_model/Llama-3.2-1B-Instruct-nxdi-lnc1-tp4-b1-ctx128-seq256/` |
-| Profile + JSON | `$TRACED/profile/` (`profile.json`, `*_nc_*_model_*.json`, NTFFs) |
+| Profile + JSON      | `$TRACED/profile/` (`profile.json`, `*_nc_*_model_*.json`, NTFFs)             |
+
 
 Set `NEURON_LOGICAL_NC_CONFIG=1` before any Neuron import (the script and runner both do this). Compile clears stale `/tmp/nxd_model` via `--clean-cache`.
 
@@ -86,7 +90,7 @@ Many `ERRO invalid DMA duration - transfer rate is invalid` lines from `neuron-e
 
 ### Note on earlier `llama2/LlamaRunner` attempts
 
-An early version of `run_llama32_1b_trn2.py` wrapped **`llama2/LlamaRunner`** (HF + NxD examples). That path could compile but often failed on decode with `NRT_EXEC_OOB` on `token_generation_model`. **The current runner and `capture_and_export.sh` do not use that stack.**
+An early version of `run_llama32_1b_trn2.py` wrapped `**llama2/LlamaRunner**` (HF + NxD examples). That path could compile but often failed on decode with `NRT_EXEC_OOB` on `token_generation_model`. **The current runner and `capture_and_export.sh` do not use that stack.**
 
 ---
 
@@ -96,11 +100,13 @@ Explorer exports **one device JSON per (NeuronCore × model execution)**.
 
 Typical Llama 3.2 run: **3 NEFF phases × 4 cores = 12 files**:
 
-| Model hash (suffix) | NEFF role |
-|---------------------|-----------|
-| `677185323126852` | `context_encoding_model` (prefill) |
-| `446048307616134` | `token_generation_model` (decode) |
-| `579692064539910` | `layout_opt/graph.neff` (load/warmup) |
+
+| Model hash (suffix) | NEFF role                             |
+| ------------------- | ------------------------------------- |
+| `677185323126852`   | `context_encoding_model` (prefill)    |
+| `446048307616134`   | `token_generation_model` (decode)     |
+| `579692064539910`   | `layout_opt/graph.neff` (load/warmup) |
+
 
 Pick phase at ingest with `--model-key` (substring match). For decode simulation, use `446048307616134`.
 
@@ -166,11 +172,13 @@ python profiler/visualize_trace.py data/traces/llama32_1b_decode_4core.json
 #   profiler/out/llama32_1b_decode_4core_viz/trace_top_tensors.png
 ```
 
-| Panel | Meaning |
-|-------|---------|
-| Left | Tensor count by category |
-| Middle | Sum of static `tensor.bytes` (NEFF catalog) |
-| Right | Sum of `access` event bytes (traffic after ingest) |
+
+| Panel  | Meaning                                            |
+| ------ | -------------------------------------------------- |
+| Left   | Tensor count by category                           |
+| Middle | Sum of static `tensor.bytes` (NEFF catalog)        |
+| Right  | Sum of `access` event bytes (traffic after ingest) |
+
 
 ### Raw Neuron device JSON (hardware)
 
@@ -220,7 +228,7 @@ Device JSON `warnings[]` on decode often includes:
 
 > Missing additional dynamic DMA metadata … Try capturing with `--enable-dge-notifs` or `NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1`
 
-**`capture_and_export.sh` does not set that flag by default** (to avoid `NRT_EXEC_SW_NQ_OVERFLOW` on DGE-heavy graphs). Without it, Explorer cannot correlate most `software_dynamic` / `hardware_dynamic` transfers to NEFF tensors → `variable=unknown`. **Re-exporting JSON does not help**; you must **re-capture** with DGE notifications enabled:
+`**capture_and_export.sh` does not set that flag by default** (to avoid `NRT_EXEC_SW_NQ_OVERFLOW` on DGE-heavy graphs). Without it, Explorer cannot correlate most `software_dynamic` / `hardware_dynamic` transfers to NEFF tensors → `variable=unknown`. **Re-exporting JSON does not help**; you must **re-capture** with DGE notifications enabled:
 
 ```bash
 ENABLE_DGE_NOTIFS=1 ./capture_and_export.sh
@@ -231,20 +239,24 @@ If the run hangs or fails with `NRT_EXEC_SW_NQ_OVERFLOW`, disable the flag and k
 
 NXDI’s `token_generation_model` streams most HBM→SBUF traffic through **dynamic DMA queues**:
 
-| `queue_type` | Share of unknown-route decode rows (nc0) |
-|--------------|------------------------------------------|
-| `software_dynamic` | ~75% |
-| `hardware_dynamic` | ~24% |
-| `instruction` | ~1% |
+
+| `queue_type`       | Share of unknown-route decode rows (nc0) |
+| ------------------ | ---------------------------------------- |
+| `software_dynamic` | ~75%                                     |
+| `hardware_dynamic` | ~24%                                     |
+| `instruction`      | ~1%                                      |
+
 
 These correspond to **Descriptor Generation Engine (DGE)** transfers — addresses resolved at runtime (weight tile streaming, gathers, indirect indexing), not fixed compile-time `WEIGHT→SB` / `INPUT→SB` descriptors. Neuron Explorer’s NTFF→NEFF correlation works well for static routes; for dynamic queues it often has no `variable`, `function`, or `subgraph` to emit.
 
 Measured on this instance’s profile (nc0):
 
-| Phase | `unknown→unknown` rows | Bytes on unknown route | Rows with `function` | `annotation` (Tensor Viewer) |
-|-------|------------------------|------------------------|----------------------|--------------------------------|
-| Decode | **100%** (151,316 / 151,351) | 622.5 MB (= `summary.hbm_read_bytes`) | 0 | 0 |
-| Prefill | **98.8%** (183,637 / 185,957) | 694 MB | 2,320 | 0 |
+
+| Phase   | `unknown→unknown` rows        | Bytes on unknown route                | Rows with `function` | `annotation` (Tensor Viewer) |
+| ------- | ----------------------------- | ------------------------------------- | -------------------- | ---------------------------- |
+| Decode  | **100%** (151,316 / 151,351)  | 622.5 MB (= `summary.hbm_read_bytes`) | 0                    | 0                            |
+| Prefill | **98.8%** (183,637 / 185,957) | 694 MB                                | 2,320                | 0                            |
+
 
 Prefill is slightly better (a few thousand rows name compiler temps like `intermediate35, intermediate36` on `VIRTUAL→VIRTUAL` routes). Decode has essentially none of that metadata.
 
@@ -256,20 +268,24 @@ Ingest or a tensor name mapper cannot recover `layer_7.mlp.gate_proj.weight` fro
 
 ### Profile `warnings[]` — what they mean
 
-| Warning | Cause | What to do |
-|---------|--------|------------|
-| **Missing additional dynamic DMA metadata** | Capture without DGE notifications | `ENABLE_DGE_NOTIFS=1 ./capture_and_export.sh` (re-capture, not re-export). If you get `NRT_EXEC_SW_NQ_OVERFLOW` or timeout, leave flag off and use dmsim `hbm_traffic_*` ingest. |
-| **NEFF missing compiler metrics** | NEFF built with older `neuronx-cc` than current tools | `COMPILE=1` after upgrading compiler/DLAMI (`neuronx-cc` on this AMI was 2.25.x while tools are 2.30.x). Helps Explorer summaries / Tensor Viewer, not a substitute for DGE notifs. |
-| **Inputs/weights size > measured HBM read/write** | Static NEFF tensor sizes vs incomplete dynamic-DMA measurement | Usually improves when DGE metadata is present; otherwise expected when most DMA stays `unknown`. |
+
+| Warning                                           | Cause                                                          | What to do                                                                                                                                                                          |
+| ------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Missing additional dynamic DMA metadata**       | Capture without DGE notifications                              | `ENABLE_DGE_NOTIFS=1 ./capture_and_export.sh` (re-capture, not re-export). If you get `NRT_EXEC_SW_NQ_OVERFLOW` or timeout, leave flag off and use dmsim `hbm_traffic_`* ingest.    |
+| **NEFF missing compiler metrics**                 | NEFF built with older `neuronx-cc` than current tools          | `COMPILE=1` after upgrading compiler/DLAMI (`neuronx-cc` on this AMI was 2.25.x while tools are 2.30.x). Helps Explorer summaries / Tensor Viewer, not a substitute for DGE notifs. |
+| **Inputs/weights size > measured HBM read/write** | Static NEFF tensor sizes vs incomplete dynamic-DMA measurement | Usually improves when DGE metadata is present; otherwise expected when most DMA stays `unknown`.                                                                                    |
+
 
 ### Partial workarounds (future / optional)
 
-| Approach | What you get | Limitation |
-|----------|--------------|------------|
-| dmsim ingest heuristic (implemented) | Category-level HBM traffic (`hbm_traffic_weight`, …) | Not per-layer |
-| Time-align DMA with `layer_summary` windows | Traffic per kernel/layer | Still not per-tensor |
-| `--include-system-events` | Sparse `nrt_tensor_read` events | Opaque runtime tensor IDs |
-| Prefill JSON for ingest | Slightly more named routes | Wrong phase for decode sim; still ~99% unknown |
+
+| Approach                                    | What you get                                         | Limitation                                     |
+| ------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------- |
+| dmsim ingest heuristic (implemented)        | Category-level HBM traffic (`hbm_traffic_weight`, …) | Not per-layer                                  |
+| Time-align DMA with `layer_summary` windows | Traffic per kernel/layer                             | Still not per-tensor                           |
+| `--include-system-events`                   | Sparse `nrt_tensor_read` events                      | Opaque runtime tensor IDs                      |
+| Prefill JSON for ingest                     | Slightly more named routes                           | Wrong phase for decode sim; still ~99% unknown |
+
 
 ---
 
@@ -279,25 +295,29 @@ Recent Neuron releases improved Explorer UI and tooling, but **do not fix dynami
 
 ### Versions on this instance
 
-| Component | Version |
-|-----------|---------|
+
+| Component                               | Version                          |
+| --------------------------------------- | -------------------------------- |
 | `neuron-explorer` / `aws-neuronx-tools` | **2.30.10.0** (built 2026-05-18) |
-| `aws-neuronx-runtime-lib` | 2.32.31.0 |
-| `aws-neuronx-dkms` (driver) | 2.28.0.0 |
-| `neuronx-cc` (compiler) | 2.25.3371.0 |
-| `torch-neuronx` | 2.9.0.2.14 |
-| `neuronx-distributed-inference` | 0.10.17970 |
+| `aws-neuronx-runtime-lib`               | 2.32.31.0                        |
+| `aws-neuronx-dkms` (driver)             | 2.28.0.0                         |
+| `neuronx-cc` (compiler)                 | 2.25.3371.0                      |
+| `torch-neuronx`                         | 2.9.0.2.14                       |
+| `neuronx-distributed-inference`         | 0.10.17970                       |
+
 
 `apt` reports **2.30.10.0 is the latest** `aws-neuronx-tools` candidate on this AMI.
 
 ### Relevant release notes
 
-| Release | Date | DMA / Explorer relevance |
-|---------|------|--------------------------|
-| **2.29.1** | May 1, 2026 | “Fixed Neuron Explorer to display DMA information correctly” — **UI Device Profile pane display bug**, not dynamic-DMA→tensor correlation in exports. |
-| **2.29.0** | Apr 9, 2026 | Explorer out of beta; System Trace HBM usage; Tensor Viewer (NEFF-level aggregates, not per-dynamic-DMA row). |
-| **2.28.0** | Feb 25, 2026 | Tensor Viewer + Database Viewer added. |
-| **2.30.0** | May 2026 | Region Highlighter, PCIe transfer viz, Dependency Chain Viewer — no mention of dynamic DMA attribution. |
+
+| Release    | Date         | DMA / Explorer relevance                                                                                                                              |
+| ---------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **2.29.1** | May 1, 2026  | “Fixed Neuron Explorer to display DMA information correctly” — **UI Device Profile pane display bug**, not dynamic-DMA→tensor correlation in exports. |
+| **2.29.0** | Apr 9, 2026  | Explorer out of beta; System Trace HBM usage; Tensor Viewer (NEFF-level aggregates, not per-dynamic-DMA row).                                         |
+| **2.28.0** | Feb 25, 2026 | Tensor Viewer + Database Viewer added.                                                                                                                |
+| **2.30.0** | May 2026     | Region Highlighter, PCIe transfer viz, Dependency Chain Viewer — no mention of dynamic DMA attribution.                                               |
+
 
 ### Re-export test (same NTFFs, current Explorer)
 
@@ -320,7 +340,7 @@ First ingest of Llama decode produced only **4 access events** (activation) acro
 
 ### Cause
 
-Original ingest only kept DMA rows with explicit routes (`WEIGHT→SB`, `VIRTUAL→SB`, etc.) and dropped the ~99% unknown dynamic rows above. See [Why decode DMA rows are `unknown`](#why-decode-dma-rows-are-unknown).
+Original ingest only kept DMA rows with explicit routes (`WEIGHT→SB`, `VIRTUAL→SB`, etc.) and dropped the ~99% unknown dynamic rows above. See [Why decode DMA rows are `unknown](#why-decode-dma-rows-are-unknown)`.
 
 ### Fix (`src/dmsim/trace/neuron_json_ingest.py`)
 
@@ -329,7 +349,7 @@ For unknown routes on `software_dynamic` / `hardware_dynamic` / `instruction` qu
 1. Treat as **HBM → SBUF read** (`target_level: sbuf`).
 2. Split bytes across synthetic tensors `hbm_traffic_weight`, `hbm_traffic_kv_cache`, `hbm_traffic_other`, … using NEFF catalog size ratios.
 
-After fix, 4-core decode ingest shows ~1.5 GB weight, ~1.0 GB other, ~16 MB kv_cache access bytes (~2.5 GB total ≈ 621 MB × 4).
+After fix, 4-core decode ingest shows ~~1.5 GB weight, ~1.0 GB other, ~16 MB kv_cache access bytes (~~2.5 GB total ≈ 621 MB × 4).
 
 **Re-ingest after updating ingest code:**
 
@@ -347,28 +367,30 @@ Details: [NEURON_PROFILE.md](NEURON_PROFILE.md#dma-record-shape-abbreviated).
 ## Tensor mapper quirks (decode)
 
 - Decode NEFF uses shapes like `[1 2 256 64]` for many `input3+` slots; mapper expects prefill-style KV `[1 128 2 64]`, so early inputs may classify as `other` in the catalog.
-- Named weights in the catalog appear from ~`input19` (`layer_0.attention.wq.weight`, etc.).
+- Named weights in the catalog appear from ~`input19 `(`layer_0.attention.wq.weight`, etc.).
 - `cat.entries()[:20]` is string-sorted (`input10` before `input3`); sort numerically as above.
 
 ---
 
 ## File map
 
-| File | Role |
-|------|------|
-| `profiler/capture_and_export.sh` | **Main capture + JSON export** |
-| `profiler/run_llama32_1b_trn2.py` | NXDI compile/run wrapper |
-| `profiler/visualize_trace.py` | Charts from ingested dmsim trace |
-| `profiler/visualize_profiling.py` | Charts from raw device JSON |
-| `profiler/NEURON_PROFILE.md` | JSON format reference |
-| `src/dmsim/trace/neuron_json_ingest.py` | Profile JSON → dmsim trace |
-| `src/dmsim/trace/tensor_name_mapper.py` | `inputN` → semantic names |
+
+| File                                    | Role                             |
+| --------------------------------------- | -------------------------------- |
+| `profiler/capture_and_export.sh`        | **Main capture + JSON export**   |
+| `profiler/run_llama32_1b_trn2.py`       | NXDI compile/run wrapper         |
+| `profiler/visualize_trace.py`           | Charts from ingested dmsim trace |
+| `profiler/visualize_profiling.py`       | Charts from raw device JSON      |
+| `profiler/NEURON_PROFILE.md`            | JSON format reference            |
+| `src/dmsim/trace/neuron_json_ingest.py` | Profile JSON → dmsim trace       |
+| `src/dmsim/trace/tensor_name_mapper.py` | `inputN` → semantic names        |
+
 
 ---
 
 ## Open limitations
 
-1. Unattributed dynamic DMA (~100% on decode) cannot be tied to specific layers; synthetic `hbm_traffic_*` tensors approximate **category-level** HBM traffic.
+1. Unattributed dynamic DMA (~100% on decode) cannot be tied to specific layers; synthetic `hbm_traffic_`* tensors approximate **category-level** HBM traffic.
 2. HBM→SBUF loads are recorded with `target_level: sbuf` (destination), not `hbm`.
 3. Skip layout-opt captures (`579692064539910`) for simulation; use decode or prefill keys.
 4. Neuron SDK 2.29.1–2.30.x re-export does not improve dynamic-DMA naming for this capture; upstream fix requires Explorer/runtime correlation for `software_dynamic` / `hardware_dynamic` queues.
@@ -392,6 +414,7 @@ PROFILE=/dev/shm/traced_model/Llama-3.2-1B-Instruct-nxdi-lnc1-tp4-b1-ctx128-seq2
 python -m dmsim.cli ingest \
   --profile-dir "$PROFILE" \
   --model-key 446048307616134 \
+  --min-transfer-bytes 1 \
   --output data/traces/llama32_1b_decode_4core.json
 
 python profiler/visualize_trace.py data/traces/llama32_1b_decode_4core.json
@@ -401,3 +424,4 @@ python -m dmsim.cli run \
   --policy configs/policies/decode_tiered.yaml \
   --trace data/traces/llama32_1b_decode_4core.json
 ```
+

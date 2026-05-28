@@ -100,6 +100,14 @@ dmsim pipeline \
 
 Details: [docs/NEURON_PROFILE.md](docs/NEURON_PROFILE.md).
 
+After ingest, quick **matplotlib** charts (tensor counts / bytes by category, top tensors by size):
+
+```bash
+pip install matplotlib
+python profiler/visualize_trace.py data/traces/llama32_1b_decode_4core.json
+# PNGs under profiler/out/llama32_1b_decode_4core_viz/
+```
+
 ## Trace format
 
 ```json
