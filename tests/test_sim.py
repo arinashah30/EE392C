@@ -95,6 +95,37 @@ def test_kernel_wipe_forces_reload(trace: Trace) -> None:
     assert result.kernel_wipes >= 1
 
 
+def test_ltram_homed_access_does_not_charge_stram_on_path() -> None:
+    """LtRAM→SBUF is one logical hop; StRAM must not get transfer energy."""
+    hierarchy = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
+    )
+    policy = load_policy(ROOT / "configs/policies/decode_tiered.yaml")
+    trace = Trace(
+        metadata=TraceMetadata(workload="ltram_direct"),
+        tensors=[
+            TensorRecord(
+                id="w",
+                name="weight",
+                bytes=8192,
+                category=TensorCategory.WEIGHT,
+            )
+        ],
+        events=[
+            AccessEvent(
+                t_ns=0,
+                tensor_id="w",
+                op="read",
+                bytes=8192,
+                target_level="sbuf",
+            ).model_dump(),
+        ],
+    )
+    result = run_simulation(trace, hierarchy, policy)
+    assert result.transfers_by_hop == {"ltram->sbuf": 1}
+    assert result.energy_by_level_pJ.get("stram", 0.0) == 0.0
+
+
 def test_hbm_homed_access_skips_stram_ltram_hop_keys() -> None:
     hierarchy = load_hierarchy(
         ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1

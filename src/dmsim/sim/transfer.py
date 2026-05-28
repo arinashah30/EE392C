@@ -113,7 +113,7 @@ def transfer_latency_between_levels(
     dest_id: str,
     nbytes: int,
 ) -> float:
-    """Sum latency across all physical links between two hierarchy levels."""
+    """Sum latency across every adjacent physical link between two levels (full stack walk)."""
     total = 0.0
     for hop_from, hop_to in physical_hops_between(hierarchy, source_id, dest_id):
         from_level = hierarchy.level_by_id(hop_from)
@@ -128,7 +128,7 @@ def transfer_energy_between_levels(
     dest_id: str,
     nbytes: int,
 ) -> float:
-    """Sum energy across all physical links between two hierarchy levels."""
+    """Sum energy across every adjacent physical link between two levels (full stack walk)."""
     total = 0.0
     for hop_from, hop_to in physical_hops_between(hierarchy, source_id, dest_id):
         from_level = hierarchy.level_by_id(hop_from)

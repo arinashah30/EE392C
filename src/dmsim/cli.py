@@ -102,6 +102,11 @@ def main() -> None:
         default=200_000,
         help="Cap access events after ingest (0 = no cap)",
     )
+    ingest_parser.add_argument(
+        "--skip-unattributed-dma",
+        action="store_true",
+        help="Drop unknown dynamic DMA; do not synthesize hbm_traffic_* tensors",
+    )
 
     pipe_parser = sub.add_parser(
         "pipeline", help="Ingest all NeuronCores then run or compare simulation"
@@ -143,6 +148,7 @@ def main() -> None:
             min_transfer_bytes=args.min_transfer_bytes,
             aggregate_dma=not args.no_aggregate_dma,
             max_access_events=args.max_access_events or None,
+            skip_unattributed_dma=args.skip_unattributed_dma,
         )
         trace = ingest_and_write(
             _resolve(root, args.profile_dir),

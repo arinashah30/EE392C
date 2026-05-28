@@ -4,6 +4,8 @@ instance: configs/instances/trn2_3xlarge.yaml
 
 links_GBs:
   psum_sbuf: 2048
+  # Literature macro limits on tier hops (Trainium DMA still caps at 368 GB/s)
+  stram_sbuf: 128
   sbuf_stram: 800
   stram_ltram: 600
   ltram_hbm: 2900

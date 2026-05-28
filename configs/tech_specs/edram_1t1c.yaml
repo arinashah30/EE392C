@@ -19,8 +19,10 @@ access:
 
 interface:
   line_size_bytes: 64
-  max_bandwidth_GBs: 400
+  # Literature: 64 GB/s read + 64 GB/s write (128 GB/s aggregate), Intel Haswell 22 nm 1 Gb die
+  max_bandwidth_GBs: 128
 
 notes:
   relative_cost: moderate-high
   description: trench/stacked capacitor; dedicated capacitor process
+  bandwidth_source: "128 GB/s aggregate (Haswell 22 nm; IBM POWER8 L3 macro ports)"

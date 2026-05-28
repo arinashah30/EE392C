@@ -35,6 +35,10 @@ class InstanceSpec(BaseModel):
     num_chips: int = 1
     cores_per_chip: int = 8
     hbm_gib_per_chip: float = 96
+    # Trainium2 NeuronCore DMA: aggregate delivery bandwidth caps memory transfers.
+    dma_bytes_per_ns_per_engine: float = 23.0
+    dma_engines_per_neuron_core: int = 16
+    dma_cap_transfer_bandwidth: bool = True
 
 
 class LevelConfig(BaseModel):
@@ -125,13 +129,30 @@ class ResolvedHierarchy(BaseModel):
     def index_of(self, level_id: str) -> int:
         return self.level_by_id(level_id).index
 
+    @property
+    def dma_aggregate_bandwidth_GBs(self) -> float:
+        """16 engines × 23 B/ns ≈ 368 GB/s per NeuronCore (Trainium2)."""
+        return (
+            self.instance.dma_bytes_per_ns_per_engine
+            * self.instance.dma_engines_per_neuron_core
+        )
+
     def link_bandwidth_GBs(self, from_id: str, to_id: str) -> float:
+        """Effective GB/s for a hop between hierarchy levels.
+
+        Unspecified links default to the Trainium DMA aggregate (not min of tech
+        specs). Tech ``max_bandwidth_GBs`` is the memory-macro literature value;
+        set ``links_GBs`` explicitly (e.g. ``stram_sbuf: 128``) when a hop should
+        be macro-limited instead of DMA-limited.
+        """
         key = f"{from_id}_{to_id}"
         rev = f"{to_id}_{from_id}"
         if key in self.links_GBs:
-            return self.links_GBs[key]
-        if rev in self.links_GBs:
-            return self.links_GBs[rev]
-        a = self.level_by_id(from_id).tech.interface.max_bandwidth_GBs
-        b = self.level_by_id(to_id).tech.interface.max_bandwidth_GBs
-        return min(a, b)
+            bw = self.links_GBs[key]
+        elif rev in self.links_GBs:
+            bw = self.links_GBs[rev]
+        else:
+            bw = self.dma_aggregate_bandwidth_GBs
+        if self.instance.dma_cap_transfer_bandwidth:
+            bw = min(bw, self.dma_aggregate_bandwidth_GBs)
+        return bw

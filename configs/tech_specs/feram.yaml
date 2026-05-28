@@ -18,8 +18,10 @@ access:
 
 interface:
   line_size_bytes: 64
-  max_bandwidth_GBs: 250
+  # Literature: up to ~34 GB/s (Micron HZO NVDRAM LPDDR5-class projection)
+  max_bandwidth_GBs: 34
 
 notes:
   relative_cost: moderate
   description: PZT / HZO ferroelectric capacitor
+  bandwidth_source: "~34 GB/s NVDRAM LPDDR5-class; 1.6 GB/s @ 130 nm chain FeRAM"

@@ -17,8 +17,10 @@ access:
 
 interface:
   line_size_bytes: 64
-  max_bandwidth_GBs: 350
+  # Literature: ~128 GB/s (2T gain-cell macro 65 nm, 2 ns @ 2 GHz pipelined 2 Mb array)
+  max_bandwidth_GBs: 128
 
 notes:
   relative_cost: low-moderate
   description: logic-compatible CMOS; no dedicated capacitor process
+  bandwidth_source: "~128 GB/s (65 nm 2T gain-cell macro)"

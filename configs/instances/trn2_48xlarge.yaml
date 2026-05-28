@@ -2,3 +2,6 @@ name: trn2.48xlarge
 num_chips: 16
 cores_per_chip: 8
 hbm_gib_per_chip: 96
+dma_bytes_per_ns_per_engine: 23
+dma_engines_per_neuron_core: 16
+dma_cap_transfer_bandwidth: true

@@ -36,6 +36,9 @@ from dmsim.trace.neuron_adapter import write_trace
 # DMA endpoint labels used in Neuron Explorer JSON (device trace)
 _HBM_LIKE = frozenset({"VIRTUAL", "REMOTE", "DRAM", "HBM"})
 _SBUF_LIKE = frozenset({"SB", "SBUF"})
+# Trainium decode profiles often omit source/dest on dynamic DMA; bytes still match hbm_read.
+_HBM_DYNAMIC_QUEUES = frozenset({"software_dynamic", "hardware_dynamic", "instruction"})
+_UNATTRIBUTED_VARIABLES = frozenset({"", "unknown"})
 
 
 @dataclass
@@ -48,6 +51,8 @@ class IngestOptions:
     include_system_tensor_events: bool = False
     kernel_from_layers: bool = True
     max_access_events: int | None = 200_000
+    # When False (default), unknown dynamic DMA is split into synthetic hbm_traffic_* tensors.
+    skip_unattributed_dma: bool = False
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,33 @@ class _AggBucket:
     count: int = 0
     first_ts: int = 0
     last_ts: int = 0
+
+
+@dataclass
+class _ProportionalCategoryAssigner:
+    """Spread unattributed HBM DMA bytes across categories using NEFF catalog ratios."""
+
+    targets: dict[TensorCategory, int]
+    assigned: dict[TensorCategory, int] = field(default_factory=dict)
+
+    @classmethod
+    def from_catalog(cls, catalog: NeffTensorCatalog) -> _ProportionalCategoryAssigner:
+        totals: dict[TensorCategory, int] = defaultdict(int)
+        for entry in catalog.entries():
+            if entry.category == TensorCategory.ACTIVATION:
+                continue
+            totals[entry.category] += max(entry.bytes, 1)
+        if not totals:
+            totals[TensorCategory.OTHER] = 1
+        return cls(targets=dict(totals))
+
+    def pick(self, nbytes: int) -> TensorCategory:
+        category = max(
+            self.targets,
+            key=lambda cat: self.targets[cat] - self.assigned.get(cat, 0),
+        )
+        self.assigned[category] = self.assigned.get(category, 0) + nbytes
+        return category
 
 
 def discover_profile_dir(path: Path) -> Path:
@@ -302,6 +334,28 @@ def _flat_location(loc) -> str:
     return str(loc)
 
 
+def _location_tokens(loc) -> set[str]:
+    flat = _flat_location(loc)
+    return {token for token in re.split(r"[,/]", flat.upper()) if token}
+
+
+def _is_unattributed_route(src: str, dst: str) -> bool:
+    return src.lower() == "unknown" and dst.lower() == "unknown"
+
+
+def _synthetic_traffic_id(category: TensorCategory) -> str:
+    return f"hbm_traffic_{category.value}"
+
+
+def _synthetic_traffic_record(category: TensorCategory, nbytes: int) -> TensorRecord:
+    return TensorRecord(
+        id=_synthetic_traffic_id(category),
+        name=f"hbm_read_{category.value}",
+        bytes=nbytes,
+        category=category,
+    )
+
+
 def _dma_route(dma: dict) -> tuple[str, str]:
     return _flat_location(dma.get("source")), _flat_location(dma.get("dest"))
 
@@ -358,10 +412,8 @@ def _resolve_dma_tensor(
     )
     if resolved is not None:
         record = _tensor_record_from_entry(resolved)
-        record = record.model_copy(
-            update={"bytes": max(record.bytes, transfer_bytes)},
-        )
-        return record
+        return record.model_copy(update={"bytes": max(record.bytes, transfer_bytes)})
+
     return TensorRecord(
         id=_tensor_id(variable),
         name=variable,
@@ -372,6 +424,7 @@ def _resolve_dma_tensor(
 
 def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str, TensorRecord], list[AccessEvent]]:
     catalog = build_catalog(device)
+    assigner = _ProportionalCategoryAssigner.from_catalog(catalog)
     tensors: dict[str, TensorRecord] = {}
     _seed_catalog_tensors(catalog, tensors)
     accesses: list[AccessEvent] = []
@@ -382,11 +435,40 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
         if transfer < opts.min_transfer_bytes:
             continue
         src, dst = _dma_route(dma)
-        op_target = _map_dma_to_access(src, dst)
+        variable = str(dma.get("variable") or dma.get("tensor_name") or "unknown")
+        if opts.skip_unattributed_dma and variable in _UNATTRIBUTED_VARIABLES and _is_unattributed_route(src, dst):
+            continue
+        op_target = _map_dma_to_access(src, dst, dma, skip_unattributed=opts.skip_unattributed_dma)
         if op_target is None:
             continue
         op, target_level = op_target
-        variable = str(dma.get("variable") or dma.get("tensor_name") or "unknown")
+        ts = int(dma.get("timestamp") or 0)
+        route = f"{src}->{dst}"
+
+        if variable in _UNATTRIBUTED_VARIABLES and _is_unattributed_route(src, dst):
+            if opts.skip_unattributed_dma:
+                continue
+            if opts.aggregate_dma:
+                key = _AggKey(variable=variable, route=route, op=op)
+                bucket = buckets[key]
+                bucket.bytes += transfer
+                bucket.count += 1
+                if bucket.count == 1:
+                    bucket.first_ts = ts
+                bucket.last_ts = ts
+            else:
+                _append_proportional_accesses(
+                    accesses,
+                    tensors,
+                    assigner,
+                    _AggBucket(bytes=transfer, count=1, first_ts=ts, last_ts=ts),
+                    op=op,
+                    target_level=target_level,
+                    core_id=opts.neuron_core_id,
+                    min_bytes=opts.min_transfer_bytes,
+                )
+            continue
+
         record = _resolve_dma_tensor(
             catalog,
             variable,
@@ -395,11 +477,10 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
             dst=dst,
             read_shape=dma.get("read_shape"),
         )
+        existing = tensors.get(record.id)
         tensors[record.id] = record.model_copy(
-            update={"bytes": max(tensors.get(record.id, record).bytes, transfer)},
+            update={"bytes": max(existing.bytes if existing else 0, record.bytes)},
         )
-        ts = int(dma.get("timestamp") or 0)
-        route = f"{src}->{dst}"
         if opts.aggregate_dma:
             key = _AggKey(variable=variable, route=route, op=op)
             bucket = buckets[key]
@@ -423,6 +504,23 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
     if opts.aggregate_dma:
         for key, bucket in buckets.items():
             src, dst = key.route.split("->", 1)
+            mapped = _map_dma_to_access(src, dst, skip_unattributed=opts.skip_unattributed_dma)
+            target_level = mapped[1] if mapped else "sbuf"
+            if key.variable in _UNATTRIBUTED_VARIABLES and _is_unattributed_route(src, dst):
+                if opts.skip_unattributed_dma:
+                    continue
+                _append_proportional_accesses(
+                    accesses,
+                    tensors,
+                    assigner,
+                    bucket,
+                    op=key.op,  # type: ignore[arg-type]
+                    target_level=target_level,
+                    core_id=opts.neuron_core_id,
+                    min_bytes=opts.min_transfer_bytes,
+                )
+                continue
+
             record = _resolve_dma_tensor(
                 catalog,
                 key.variable,
@@ -430,11 +528,10 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
                 src=src,
                 dst=dst,
             )
+            existing = tensors.get(record.id)
             tensors[record.id] = record.model_copy(
-                update={"bytes": max(tensors.get(record.id, record).bytes, bucket.bytes)},
+                update={"bytes": max(existing.bytes if existing else 0, bucket.bytes)},
             )
-            mapped = _map_dma_to_access(src, dst)
-            target_level = mapped[1] if mapped else "sbuf"
             accesses.append(
                 AccessEvent(
                     t_ns=_device_ts_to_ns(bucket.first_ts),
@@ -467,21 +564,82 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
     return tensors, accesses
 
 
-def _map_dma_to_access(src: str, dst: str) -> tuple[str, str] | None:
-    src_u, dst_u = src.upper(), dst.upper()
-    src_tokens = set(re.split(r"[,/]", src_u))
-    dst_tokens = set(re.split(r"[,/]", dst_u))
+def _append_proportional_accesses(
+    accesses: list[AccessEvent],
+    tensors: dict[str, TensorRecord],
+    assigner: _ProportionalCategoryAssigner,
+    bucket: _AggBucket,
+    *,
+    op: str,
+    target_level: str,
+    core_id: int,
+    min_bytes: int,
+) -> None:
+    """Split one unattributed DMA bucket across synthetic per-category HBM tensors."""
+    total_target = sum(assigner.targets.get(cat, 0) for cat in assigner.targets)
+    if total_target <= 0 or bucket.bytes <= 0:
+        return
 
-    if src_tokens & _SBUF_LIKE and dst_tokens & _HBM_LIKE:
-        return "write", "hbm"
+    allocated = 0
+    categories = [
+        cat for cat in assigner.targets if cat != TensorCategory.ACTIVATION
+    ]
+    for index, category in enumerate(categories):
+        if index == len(categories) - 1:
+            portion = bucket.bytes - allocated
+        else:
+            portion = int(bucket.bytes * assigner.targets[category] / total_target)
+        if portion < min_bytes:
+            continue
+        allocated += portion
+        assigner.assigned[category] = assigner.assigned.get(category, 0) + portion
+        record = _synthetic_traffic_record(category, portion)
+        existing = tensors.get(record.id)
+        tensors[record.id] = record.model_copy(
+            update={"bytes": max(existing.bytes if existing else 0, portion)},
+        )
+        accesses.append(
+            AccessEvent(
+                t_ns=_device_ts_to_ns(bucket.first_ts),
+                tensor_id=record.id,
+                op=op,  # type: ignore[arg-type]
+                bytes=portion,
+                target_level=target_level,
+                core_id=core_id,
+            )
+        )
+
+
+def _map_dma_to_access(
+    src: str,
+    dst: str,
+    dma: dict | None = None,
+    *,
+    skip_unattributed: bool = False,
+) -> tuple[str, str] | None:
+    src_tokens = _location_tokens(src)
+    dst_tokens = _location_tokens(dst)
+
     if src_tokens & _HBM_LIKE and dst_tokens & _SBUF_LIKE:
         return "read", "sbuf"
+    if src_tokens & _SBUF_LIKE and dst_tokens & _HBM_LIKE:
+        return "write", "hbm"
     if "WEIGHT" in src_tokens and dst_tokens & _SBUF_LIKE:
         return "read", "sbuf"
     if "INPUT" in src_tokens and dst_tokens & _SBUF_LIKE:
         return "read", "sbuf"
     if src_tokens & _SBUF_LIKE and "OUTPUT" in dst_tokens:
         return "write", "sbuf"
+
+    # Neuron Explorer often leaves source/dest as unknown on dynamic HBM DMA (Llama decode).
+    if (
+        not skip_unattributed
+        and dma is not None
+        and _is_unattributed_route(src, dst)
+    ):
+        queue_type = str(dma.get("queue_type") or "")
+        if queue_type in _HBM_DYNAMIC_QUEUES:
+            return "read", "sbuf"
     return None
 
 

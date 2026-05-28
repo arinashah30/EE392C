@@ -9,8 +9,8 @@ from dmsim.sim.transfer import (
     access_energy_pJ,
     access_latency_ns,
     path_between,
-    transfer_energy_between_levels,
-    transfer_latency_between_levels,
+    transfer_energy_pJ,
+    transfer_latency_ns,
 )
 from dmsim.trace.schema import (
     AccessEvent,
@@ -262,8 +262,12 @@ def _charge_path(
     for hop_from, hop_to in path_between(
         hierarchy, source_id, dest_id, home_id=home_id
     ):
-        lat = transfer_latency_between_levels(hierarchy, hop_from, hop_to, nbytes)
-        eng = transfer_energy_between_levels(hierarchy, hop_from, hop_to, nbytes)
+        from_level = hierarchy.level_by_id(hop_from)
+        to_level = hierarchy.level_by_id(hop_to)
+        # Charge the logical hop from path_between (home-aware), not every
+        # physical tier on the linear stack (e.g. ltram→sbuf must not detour via stram).
+        lat = transfer_latency_ns(hierarchy, from_level, to_level, nbytes)
+        eng = transfer_energy_pJ(hierarchy, from_level, to_level, nbytes)
         result.total_time_ns += lat
         result.total_energy_pJ += eng
         hop_key = f"{hop_from}->{hop_to}"
