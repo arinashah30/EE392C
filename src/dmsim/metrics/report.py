@@ -12,6 +12,7 @@ def format_report(result: SimulationResult) -> str:
         f"workload: {result.trace_workload}",
         f"total_time_ns: {result.total_time_ns:,.0f}",
         f"total_energy_pJ: {result.total_energy_pJ:,.0f}",
+        f"refresh_energy_pJ: {result.refresh_energy_pJ:,.0f}",
         f"hbm_read_bytes: {result.hbm_read_bytes:,}",
         f"hbm_write_bytes: {result.hbm_write_bytes:,}",
         f"hbm_traffic_bytes: {result.hbm_traffic_bytes:,}",

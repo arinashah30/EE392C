@@ -9,8 +9,8 @@ from dmsim.sim.transfer import (
     access_energy_pJ,
     access_latency_ns,
     path_between,
-    transfer_energy_pJ,
-    transfer_latency_ns,
+    transfer_energy_between_levels,
+    transfer_latency_between_levels,
 )
 from dmsim.trace.schema import (
     AccessEvent,
@@ -32,6 +32,8 @@ class SimulationResult:
     retention_evictions: int = 0
     corrupt_accesses: int = 0
     kernel_wipes: int = 0
+    refresh_energy_pJ: float = 0.0
+    refresh_cycles_by_level: dict[str, int] = field(default_factory=dict)
     transfers_by_hop: dict[str, int] = field(default_factory=dict)
     energy_by_level_pJ: dict[str, float] = field(default_factory=dict)
     latency_by_level_ns: dict[str, float] = field(default_factory=dict)
@@ -73,7 +75,20 @@ def run_simulation(
         total_energy_pJ=0.0,
     )
 
-    for event in trace.parsed_events():
+    parsed = trace.parsed_events()
+    prev_t_ns: float | None = parsed[0].t_ns if parsed else None
+
+    for event in parsed:
+        if prev_t_ns is not None and event.t_ns > prev_t_ns:
+            _apply_refresh_energy_between(
+                hierarchy,
+                fast_buffers,
+                pools,
+                prev_t_ns,
+                event.t_ns,
+                result,
+            )
+        prev_t_ns = event.t_ns
         if isinstance(event, KernelBoundaryEvent):
             _handle_kernel_boundary(event, hierarchy, fast_buffers, residency, result)
             continue
@@ -92,6 +107,64 @@ def run_simulation(
     return result
 
 
+def _apply_refresh_energy_between(
+    hierarchy: ResolvedHierarchy,
+    fast_buffers: dict[int, dict[str, FastBufferState]],
+    pools: dict[str, LevelPoolState],
+    start_t_ns: float,
+    end_t_ns: float,
+    result: SimulationResult,
+) -> None:
+    """Charge background refresh energy for volatile tiers over wall-clock time."""
+    if end_t_ns <= start_t_ns:
+        return
+
+    for level in hierarchy.enabled_levels:
+        tech = level.tech
+        # Refresh modeling:
+        # - If refresh_interval_s is provided, use it (e.g. DRAM/HBM refresh window).
+        # - Otherwise, for volatile tiers with retention_s, default to refreshing
+        #   every retention window.
+        interval_s = tech.refresh_interval_s
+        if interval_s is None:
+            if not tech.volatile:
+                continue
+            if not tech.retention_s or tech.retention_s <= 0:
+                continue
+            interval_s = tech.retention_s
+        if interval_s <= 0:
+            continue
+        interval_ns = interval_s * 1e9
+        energy_pJ_per_bit = (
+            tech.refresh_energy_pJ_per_bit
+            if tech.refresh_energy_pJ_per_bit is not None
+            else tech.access.write_energy_pJ_per_bit
+        )
+
+        if level.scope == "per_core":
+            occupied = 0
+            for core_state in fast_buffers.values():
+                buf = core_state.get(level.id)
+                if buf is not None:
+                    occupied += buf.used_bytes
+        else:
+            occupied = pools.get(level.id).used_bytes if level.id in pools else 0
+        if occupied <= 0:
+            continue
+
+        start_tick = int(start_t_ns // interval_ns)
+        end_tick = int(end_t_ns // interval_ns)
+        refreshes = max(0, end_tick - start_tick)
+        if refreshes == 0:
+            continue
+
+        energy = refreshes * (occupied * 8) * energy_pJ_per_bit
+        result.refresh_energy_pJ += energy
+        result.total_energy_pJ += energy
+        result.refresh_cycles_by_level[level.id] = result.refresh_cycles_by_level.get(level.id, 0) + refreshes
+        _accumulate_level(result, level.id, 0.0, energy)
+
+
 def _seed_home_allocations(
     tensor_map: dict,
     homes: dict[str, str],
@@ -100,23 +173,29 @@ def _seed_home_allocations(
     fast_buffers: dict[int, dict[str, FastBufferState]],
     pools: dict[str, LevelPoolState],
 ) -> None:
-    """Reserve capacity for tensors homed in persistent per-core levels (e.g. StRAM)."""
+    """Reserve capacity / track occupancy for homed tensors."""
     for tensor_id, home_level in homes.items():
         level = hierarchy.level_by_id(home_level)
-        if level.scope != "per_core" or home_level in hierarchy.kernel.wipe_levels_on_boundary:
-            continue
         tensor = tensor_map[tensor_id]
-        core_id = tensor.core_id if tensor.core_id is not None else 0
-        _install_in_fast_buffer(
-            hierarchy,
-            fast_buffers,
-            core_id,
-            home_level,
-            tensor_id,
-            tensor.bytes,
-            pools,
-        )
-        residency[tensor_id].resident_level = home_level
+        if level.scope == "per_core":
+            if home_level in hierarchy.kernel.wipe_levels_on_boundary:
+                continue
+            core_id = tensor.core_id if tensor.core_id is not None else 0
+            _install_in_fast_buffer(
+                hierarchy,
+                fast_buffers,
+                core_id,
+                home_level,
+                tensor_id,
+                tensor.bytes,
+                pools,
+            )
+            residency[tensor_id].resident_level = home_level
+        else:
+            pool = pools.get(home_level)
+            if pool is not None:
+                pool.install(tensor_id, tensor.bytes)
+            residency[tensor_id].resident_level = home_level
 
 
 def _fast_buffer(
@@ -262,12 +341,10 @@ def _charge_path(
     for hop_from, hop_to in path_between(
         hierarchy, source_id, dest_id, home_id=home_id
     ):
-        from_level = hierarchy.level_by_id(hop_from)
-        to_level = hierarchy.level_by_id(hop_to)
-        # Charge the logical hop from path_between (home-aware), not every
-        # physical tier on the linear stack (e.g. ltram→sbuf must not detour via stram).
-        lat = transfer_latency_ns(hierarchy, from_level, to_level, nbytes)
-        eng = transfer_energy_pJ(hierarchy, from_level, to_level, nbytes)
+        # Charge the logical hop from path_between (home-aware) but sum the
+        # physical links between hop endpoints for bandwidth/latency/energy.
+        lat = transfer_latency_between_levels(hierarchy, hop_from, hop_to, nbytes)
+        eng = transfer_energy_between_levels(hierarchy, hop_from, hop_to, nbytes)
         result.total_time_ns += lat
         result.total_energy_pJ += eng
         hop_key = f"{hop_from}->{hop_to}"

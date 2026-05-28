@@ -4,6 +4,8 @@ instance: configs/instances/trn2_3xlarge.yaml
 
 links_GBs:
   psum_sbuf: 2048
+  # Direct path to HBM controller (bypasses optional StRAM/LtRAM tiers).
+  hbm_sbuf: 2900
   stram_sbuf: 128
   sbuf_stram: 800
   stram_ltram: 600

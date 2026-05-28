@@ -12,7 +12,19 @@ def physical_hops_between(
     source_id: str,
     dest_id: str,
 ) -> list[tuple[str, str]]:
-    """Every adjacent link along the hierarchy between source and dest."""
+    """
+    Physical hops used for bandwidth/latency/energy accounting.
+
+    If the hierarchy declares an explicit direct link between two levels
+    (e.g. `links_GBs: { hbm_sbuf: ... }`), we treat it as a direct hop.
+    Otherwise we fall back to walking the linear enabled-level order.
+    """
+    # Prefer an explicit direct interconnect edge when present.
+    key = f"{source_id}_{dest_id}"
+    rev = f"{dest_id}_{source_id}"
+    if key in hierarchy.links_GBs or rev in hierarchy.links_GBs:
+        return [(source_id, dest_id)] if source_id != dest_id else []
+
     order = level_order(hierarchy)
     i = order.index(source_id)
     j = order.index(dest_id)

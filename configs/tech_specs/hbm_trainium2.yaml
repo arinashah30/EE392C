@@ -5,6 +5,11 @@ retention_s: null
 # Effective in-plane density for constant-area tradeoffs vs on-die LtRAM
 cell_density_bits_per_um2: 1.1
 
+# Background refresh (modeled as periodic full refresh of allocated bytes).
+# Typical DRAM refresh window is on the order of 64 ms (device dependent).
+refresh_interval_s: 0.064
+refresh_energy_pJ_per_bit: 1.5
+
 access:
   read_latency_ns: 120
   write_latency_ns: 120

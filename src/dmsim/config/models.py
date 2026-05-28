@@ -23,6 +23,11 @@ class TechnologySpec(BaseModel):
     class_: str = Field(alias="class")
     volatile: bool = True
     retention_s: float | None = None
+    # Optional refresh modeling (primarily for volatile eDRAM-like tiers).
+    # If omitted and retention_s is set, the simulator may derive a default
+    # refresh interval from retention_s.
+    refresh_interval_s: float | None = None
+    refresh_energy_pJ_per_bit: float | None = None
     cell_density_bits_per_um2: float | None = None
     access: AccessSpec
     interface: InterfaceSpec

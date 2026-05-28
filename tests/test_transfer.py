@@ -12,11 +12,9 @@ def test_physical_path_includes_all_intermediate_levels() -> None:
         ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
     )
     hops = physical_hops_between(hierarchy, "hbm", "sbuf")
-    assert hops == [
-        ("hbm", "ltram"),
-        ("ltram", "stram"),
-        ("stram", "sbuf"),
-    ]
+    # With an explicit `hbm_sbuf` link configured, the simulator should take
+    # the direct path rather than walking through intermediate tiers.
+    assert hops == [("hbm", "sbuf")]
 
 
 def test_home_aware_path_skips_unused_tiers() -> None:
