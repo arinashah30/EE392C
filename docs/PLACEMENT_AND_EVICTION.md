@@ -88,7 +88,7 @@ Example: weight **home = LtRAM**, load to SBUF → **`ltram → sbuf` only** (no
 
 Per hop: `read_latency + nbytes / bandwidth + write_latency` (`transfer_latency_ns`).
 
-Bandwidth is **not** taken from tech-spec `max_bandwidth_GBs` or per-link `links_GBs`. Hierarchy YAML sets:
+Hierarchy YAML sets interconnect bandwidth: **DMA hops** use `dma_bandwidth_GBs`; **datapath reads** (SBUF scratch, StRAM direct read) use `on_chip_bandwidth_GBs`. Hierarchy sets:
 
 ```yaml
 interconnect:
@@ -133,14 +133,9 @@ If SBUF (or StRAM, etc.) runs out of space while tracking what’s cached:
 - Remove **one** older entry (first in a simple list — not a full LRU).
 - **No extra traffic** is modeled for that eviction (no writeback to HBM).
 
-### 3. StRAM retention timer (only if home is StRAM)
+### 3. Background refresh (StRAM / HBM)
 
-StRAM tech has a short **retention** (~40 µs). If a tensor **homes in StRAM** and nothing touches it for longer than that:
-
-- Next access is treated as **stale/corrupt**.
-- Model reloads from **HBM → home** and counts a retention eviction.
-
-Weights in LtRAM and data in HBM do **not** use this rule.
+Between trace events, the simulator charges **refresh energy** for occupied bytes at each level’s `refresh_interval_s` (from tech YAML, overridable per level). **StRAM data is assumed to stay valid** while allocated — there is no retention-expiry / corrupt-reload path. LtRAM is non-volatile and has no refresh in the default specs.
 
 ---
 

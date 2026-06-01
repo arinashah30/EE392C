@@ -6,3 +6,7 @@
 - Set --max-access-events to 0
 - Changed StRAM -> SBUF reads to be treated as StRAM read hits (no traffic or writes)
 - Fixed fastpool clear and residency reset on kernel-wipes to be per-core (heuristic model, not actually the behavior?)
+
+- Area budget had mode to maintain capacity, not area. Changed to assign memory capacities based on area and tech density
+- Assume StRAM/HBM refresh is frequent enough that retention expiry is not simulated (refresh energy only; no corrupt reloads)
+- Altered on-chip reads to be read latency + on-chip BW latency instead of line access time

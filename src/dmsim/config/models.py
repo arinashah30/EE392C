@@ -23,9 +23,7 @@ class TechnologySpec(BaseModel):
     class_: str = Field(alias="class")
     volatile: bool = True
     retention_s: float | None = None
-    # Optional refresh modeling (primarily for volatile eDRAM-like tiers).
-    # If omitted and retention_s is set, the simulator may derive a default
-    # refresh interval from retention_s.
+    # Periodic refresh for volatile tiers (e.g. HBM 64 ms, eDRAM ~40 µs).
     refresh_interval_s: float | None = None
     refresh_energy_pJ_per_bit: float | None = None
     cell_density_bits_per_um2: float | None = None
@@ -63,6 +61,8 @@ class LevelConfig(BaseModel):
     tech: str
     scope: Literal["per_core", "per_chip", "global"] = "per_chip"
     capacity_bytes: int | None = None
+    # Override tech ``refresh_interval_s`` for this level (simulator only).
+    refresh_interval_s: float | None = None
 
 
 class KernelConfig(BaseModel):
@@ -86,9 +86,9 @@ class AreaBudgetConfig(BaseModel):
     nominal_hbm_gib_per_chip: float | None = None
     sbuf_reference_density_bits_per_um2: float = 2.44
     hbm_reference_density_bits_per_um2: float = 1.1
-    # If set (0–1), size StRAM/LtRAM from fractions of nominal SBUF/HBM area.
-    stram_replaces_sbuf_fraction: float | None = None
-    ltram_replaces_hbm_fraction: float | None = None
+    # Fraction (0–1) of nominal SBUF/HBM die area traded to StRAM/LtRAM.
+    stram_replaces_sbuf_fraction: float = 0.0
+    ltram_replaces_hbm_fraction: float = 0.0
 
 
 class HierarchyConfig(BaseModel):
@@ -131,11 +131,15 @@ class ResolvedLevel(BaseModel):
     capacity_bytes: int
     interconnect: InterconnectDomain
     enabled: bool = True
+    refresh_interval_s: float | None = None
 
     @property
-    def has_retention(self) -> bool:
-        return self.tech.retention_s is not None and self.tech.retention_s > 0
-
+    def effective_refresh_interval_s(self) -> float | None:
+        if self.refresh_interval_s is not None:
+            if self.refresh_interval_s <= 0:
+                return None
+            return self.refresh_interval_s
+        return self.tech.refresh_interval_s
 
 class ResolvedHierarchy(BaseModel):
     name: str

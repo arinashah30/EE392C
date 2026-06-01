@@ -20,7 +20,7 @@ flowchart TD
     AL --> LV
 ```
 
-**Important:** trace timestamp gaps (`t_ns` between events) are **not** added to `total_time_ns`. They are only used for refresh energy and retention checks.
+**Important:** trace timestamp gaps (`t_ns` between events) are **not** added to `total_time_ns`. They are only used for refresh energy between events.
 
 ---
 
@@ -80,29 +80,28 @@ T_{\text{transfer}} = T_{\text{read}}(\text{from}) + \frac{\text{nbytes}}{BW_{\t
 
 Set in hierarchy YAML under `interconnect:` — see [`trainium2_baseline.yaml`](../../configs/hierarchy/trainium2_baseline.yaml).
 
-**Note:** tech YAML `interface.max_bandwidth_GBs` is **not** used for transfer time in the simulator today.
+**Note:** tech `interface.max_bandwidth_GBs` is **not** used for interconnect hops; those use `link_bandwidth_GBs` above.
 
-### 2. Local access — `access_latency_ns`
+### 2. Local / datapath read — `datapath_read_latency_ns`
 
-Used when [`_charge_local_access`](../../src/dmsim/sim/engine.py) runs:
+Used when [`_charge_local_access`](../../src/dmsim/sim/engine.py) runs for **reads**:
 
-- `source == target` and `op == "read"` (scratch hits, local hits at home)
-- **StRAM direct read** (`_is_direct_stram_read`) — local at `stram` even though trace `target_level` is `sbuf`
+- SBUF **scratch hit** (`source == target == sbuf`, home elsewhere)
+- **StRAM direct read** (`_is_direct_stram_read`) — compute reads StRAM, not DMA `stram→sbuf`
 
-**Not used for:** same-level **`write`** events (`source == target`, `op == write`) — those are omitted entirely (0 ns).
+**Not used for:** same-level **`write`** events — omitted (0 ns). Writes still use line-granularity in `access_latency_ns` if charged elsewhere.
 
 ```python
-def access_latency_ns(level, op, nbytes):
-    line = level.tech.interface.line_size_bytes
-    lines = max(1, (nbytes + line - 1) // line)
-    per_line = (
-        level.tech.access.read_latency_ns if op == "read"
-        else level.tech.access.write_latency_ns
-    )
-    return per_line * lines
+def datapath_read_latency_ns(level, nbytes, hierarchy):
+    return level.tech.access.read_latency_ns + nbytes / hierarchy.on_chip_bandwidth_GBs
 ```
 
-**Formula:** line-granularity latency at one level.
+| Traffic | Mechanism in model | Bandwidth source |
+|---------|-------------------|------------------|
+| HBM/LtRAM → SBUF | `transfer_latency_ns` | `interconnect.dma_bandwidth_GBs` (~368 GB/s per core) |
+| SBUF/StRAM → compute | `datapath_read_latency_ns` | `interconnect.on_chip_bandwidth_GBs` (hierarchy YAML) |
+
+This matches Trainium2: **DMA engines** move data off-chip into SBUF; **engine datapaths** read SBUF/StRAM for execution.
 
 ---
 
@@ -169,8 +168,6 @@ _accumulate_level(result, target, lat, eng)
 ```
 AccessEvent
     │
-    ├─ corrupt reload? → _charge_path(deepest → home)     → transfer_latency_ns
-    │
     ├─ StRAM direct read? → _charge_local_access(stram)   → access_latency_ns
     │
     ├─ source != target? → _charge_path(source → target)   → transfer_latency_ns
@@ -220,7 +217,7 @@ On non-aggregated traces, **local SBUF** (`latency_by_level_ns["sbuf"]`) often d
 | `line_size_bytes` | same | Local access line count |
 | `dma_bandwidth_GBs`, `on_chip_bandwidth_GBs` | hierarchy YAML | Transfer `nbytes/BW` only |
 | `level_domain` | hierarchy YAML | Which BW rule applies |
-| Trace `bytes` | trace JSON | Transfer + local line count |
+| Trace `bytes` | trace JSON | Transfer size; datapath reads use `nbytes / on_chip_bandwidth_GBs` |
 | Residency / kernel wipes | simulator state | How often interconnect vs local |
 
 ---

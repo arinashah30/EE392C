@@ -29,7 +29,7 @@ How **dmsim** turns an ingested trace into **time**, **energy**, and **HBM traff
 | **Source** | Level data is read *from* for this access (derived in `_source_level_for_access`). |
 | **Interconnect move** | `source != target` → charge via `_charge_path` (transfer latency/energy). Exception: **StRAM direct read** — local at home even when target is SBUF. |
 | **Local access** | [`_charge_local_access`](../../src/dmsim/sim/engine.py): scratch/read hits via `access_latency_ns` / `access_energy_pJ`. Includes **StRAM direct read**. |
-| **Scratch hit** | `resident == target != home` (e.g. SBUF cache hit); local access only, no retention check. |
+| **Scratch hit** | `resident == target != home` (e.g. SBUF cache hit); local access only. |
 | **StRAM direct read** | `home == stram`, `resident == home`, read to SBUF → local at StRAM, **no** `stram→sbuf` hop. |
 | **Same-level write** | `source == target`, `op == write` → **no** latency or energy (in-place SBUF touch). |
 | **Writeback** | Trace `write` to an off-chip `target_level` → modeled as `sbuf → target` flush. |
@@ -111,8 +111,6 @@ Defined in [`src/dmsim/sim/residency.py`](../../src/dmsim/sim/residency.py):
 class TensorResidency:
     home_level: str
     resident_level: str | None = None
-    last_home_touch_ns: float | None = None
-    corrupt: bool = False
     initialized_at_home: bool = False
 ```
 
@@ -125,7 +123,7 @@ TensorResidency(home_level="hbm", resident_level="hbm")
 After a successful load into SBUF:
 
 ```python
-TensorResidency(home_level="hbm", resident_level="sbuf", last_home_touch_ns=1205000.0)
+TensorResidency(home_level="hbm", resident_level="sbuf")
 ```
 
 ### Output: SimulationResult

@@ -1,5 +1,5 @@
 name: trainium2_diff_mem_50sbuf_25hbm
-description: StRAM takes 50% of nominal SBUF capacity per core; LtRAM takes 25% of nominal HBM capacity
+description: StRAM takes 50% of nominal SBUF die area per core; LtRAM takes 25% of nominal HBM die area
 instance: configs/instances/trn2_3xlarge.yaml
 
 interconnect:

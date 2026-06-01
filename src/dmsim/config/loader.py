@@ -62,14 +62,14 @@ def load_policy(path: Path) -> PolicyConfig:
     return PolicyConfig.model_validate(data)
 
 
-def _capacity_set_by_area_budget(config: HierarchyConfig, level_id: str) -> bool:
+def _capacity_from_area_budget(config: HierarchyConfig, level_id: str) -> bool:
     if not config.area_budget.enabled:
         return False
-    budget = config.area_budget
-    if level_id == "stram" and budget.stram_replaces_sbuf_fraction is not None:
-        return True
-    if level_id == "ltram" and budget.ltram_replaces_hbm_fraction is not None:
-        return True
+    enabled_ids = {level.id for level in config.levels if level.enabled}
+    if level_id == "stram":
+        return "stram" in enabled_ids and "sbuf" in enabled_ids
+    if level_id == "ltram":
+        return "ltram" in enabled_ids and "hbm" in enabled_ids
     return False
 
 
@@ -110,6 +110,7 @@ def load_hierarchy(
                     capacity_bytes=level.capacity_bytes or 0,
                     interconnect=_resolve_interconnect(level.id, config.interconnect),
                     enabled=False,
+                    refresh_interval_s=level.refresh_interval_s,
                 )
             )
             continue
@@ -121,7 +122,7 @@ def load_hierarchy(
 
         if capacity is None:
             raise ValueError(f"level {level.id} requires capacity_bytes or HBM instance spec")
-        if capacity <= 0 and not _capacity_set_by_area_budget(config, level.id):
+        if capacity <= 0 and not _capacity_from_area_budget(config, level.id):
             raise ValueError(f"level {level.id} requires capacity_bytes or HBM instance spec")
 
         resolved.append(
@@ -133,6 +134,7 @@ def load_hierarchy(
                 capacity_bytes=capacity,
                 interconnect=_resolve_interconnect(level.id, config.interconnect),
                 enabled=True,
+                refresh_interval_s=level.refresh_interval_s,
             )
         )
         enabled_index += 1

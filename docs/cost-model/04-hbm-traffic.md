@@ -112,21 +112,11 @@ Many small writebacks (few MB total, ~100k+ events) can dominate **hop count** a
 
 ## `count_hbm` flag
 
-`_charge_path` accepts `count_hbm: bool`. All normal access and corrupt-reload paths pass **`count_hbm=True`**.
+`_charge_path` accepts `count_hbm: bool`. All normal access paths pass **`count_hbm=True`**.
 
 If `count_hbm=False`, hops would still charge latency/energy but not increment HBM byte counters. (No production call sites use `False` today.)
 
----
-
-## Corrupt reload path
-
-When retention expires ([`_check_retention_expired`](../../src/dmsim/sim/engine.py)), the simulator reloads from **`deepest`** enabled level (usually HBM) into **`home_level`**:
-
-```python
-_charge_path(hierarchy, reload_from, state.home_level, nbytes, ..., count_hbm=True)
-```
-
-If `home_level` is LtRAM: hop **`hbm → ltram`** counts **`hbm_read_bytes`**, not a full load to SBUF yet. A subsequent access may add **`ltram → sbuf`** without HBM traffic.
+StRAM retention expiry is **not** modeled; refresh is assumed sufficient to keep homed data valid.
 
 ---
 

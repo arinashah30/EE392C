@@ -18,8 +18,6 @@ def format_report(result: SimulationResult) -> str:
         f"hbm_read_bytes: {result.hbm_read_bytes:,}",
         f"hbm_write_bytes: {result.hbm_write_bytes:,}",
         f"hbm_traffic_bytes: {result.hbm_traffic_bytes:,}",
-        f"retention_evictions: {result.retention_evictions}",
-        f"corrupt_accesses: {result.corrupt_accesses}",
         f"kernel_wipes: {result.kernel_wipes}",
         "",
         "transfers_by_hop:",
@@ -64,10 +62,6 @@ def compare_results(
             "baseline": baseline.hbm_traffic_bytes,
             "candidate": candidate.hbm_traffic_bytes,
             "pct_change": delta(baseline.hbm_traffic_bytes, candidate.hbm_traffic_bytes),
-        },
-        "corrupt_accesses": {
-            "baseline": baseline.corrupt_accesses,
-            "candidate": candidate.corrupt_accesses,
         },
     }
 

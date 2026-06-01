@@ -6,6 +6,9 @@ volatile: true
 # Retention: 40–110 µs (requires refresh; IBM 45 nm up to 110 µs @ 99.9% yield)
 # Conservative 40 µs for retention/eviction modeling
 retention_s: 0.00004
+# All rows refreshed within retention window (~40 µs class eDRAM).
+refresh_interval_s: 0.00004
+refresh_energy_pJ_per_bit: 1.0
 
 # 11 Mbit/mm² → 11 bits/µm² (IBM 32 nm, cell area 0.039 µm²); ~4.5× vs 6T SRAM
 cell_density_bits_per_um2: 11.0
@@ -19,7 +22,7 @@ access:
 
 interface:
   line_size_bytes: 64
-  # Literature: 64 GB/s read + 64 GB/s write (128 GB/s aggregate), Intel Haswell 22 nm 1 Gb die
+  # Literature array BW (not used for datapath read latency; see hierarchy on_chip_bandwidth_GBs).
   max_bandwidth_GBs: 128
 
 notes:

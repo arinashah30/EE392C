@@ -49,7 +49,7 @@ This plan defines how the **dmsim simulation cost model** is documented: hops, l
 
 1. **Direct hops only** — one logical edge per interconnect charge; no automatic walk through YAML `levels:` order. Multi-stage paths require multiple trace events.
 2. **Residency drives source** — `TensorResidency.resident_level` vs `target_level` determines interconnect vs local access.
-3. **Trace `t_ns` does not add wall time** — used for event order and refresh/retention gaps, not summed into `total_time_ns`.
+3. **Trace `t_ns` does not add wall time** — used for event order and refresh-energy gaps, not summed into `total_time_ns`.
 4. **Per-core parallel time** — latency accumulates per `core_id`; `total_time_ns = max(time_by_core_ns)`.
 5. **Chip-wide sums for accounting** — `latency_by_level_ns`, `energy_by_level_pJ`, HBM bytes sum across cores.
 6. **StRAM direct read** — homed+resident at StRAM, trace read to SBUF → local at StRAM (`_is_direct_stram_read`), not `stram→sbuf`.

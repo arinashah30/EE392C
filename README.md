@@ -129,7 +129,7 @@ Categories: `weight`, `kv_cache`, `hidden`, `activation`, `other` (auto-classifi
 ## Model behavior
 
 - **Sequential analytical time**: event latencies sum on a single timeline (no compute/memory overlap yet).
-- **Retention (StRAM)**: if a tensor’s home is StRAM and `t - last_access > retention_s`, the next access is treated as **corrupt** and reloaded from HBM through the hierarchy (counts `corrupt_accesses` + extra traffic).
+- **Refresh (StRAM/HBM)**: background refresh energy is charged between trace events at `refresh_interval_s` (tech default or per-level override). The simulator assumes refresh is frequent enough that StRAM data does not expire.
 - **Kernel boundaries**: `kernel_end` wipes PSUM/SBUF fast buffers and resets residency so the next access reloads from home.
 
 ## Project layout

@@ -56,16 +56,21 @@ def transfer_latency_ns(
     return read_lat + hop_transfer + write_lat
 
 
-def access_latency_ns(level: ResolvedLevel, op: str, nbytes: int) -> float:
-    bits = nbytes * 8
+def datapath_read_latency_ns(
+    level: ResolvedLevel, nbytes: int, hierarchy: ResolvedHierarchy
+) -> float:
+    """On-chip read to compute (SBUF scratch hit, StRAM direct read)."""
+    return level.tech.access.read_latency_ns + nbytes / hierarchy.on_chip_bandwidth_GBs
+
+
+def access_latency_ns(
+    level: ResolvedLevel, op: str, nbytes: int, hierarchy: ResolvedHierarchy
+) -> float:
+    if op == "read":
+        return datapath_read_latency_ns(level, nbytes, hierarchy)
     line = level.tech.interface.line_size_bytes
     lines = max(1, (nbytes + line - 1) // line)
-    per_line = (
-        level.tech.access.read_latency_ns
-        if op == "read"
-        else level.tech.access.write_latency_ns
-    )
-    return per_line * lines
+    return level.tech.access.write_latency_ns * lines
 
 
 def access_energy_pJ(level: ResolvedLevel, op: str, nbytes: int) -> float:

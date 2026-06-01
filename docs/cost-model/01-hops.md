@@ -10,9 +10,7 @@ A **hop** is one charged interconnect edge between two memory levels, e.g. `("hb
 
 ```mermaid
 flowchart TD
-    E[AccessEvent] --> RET{Retention corrupt?}
-    RET -->|yes| RELOAD[_charge_path deepest → home]
-    RET -->|no| STRAM{StRAM direct read?}
+    E[AccessEvent] --> STRAM{StRAM direct read?}
     STRAM -->|yes| LOCAL1[_charge_local_access at stram]
     STRAM -->|no| SRC[Resolve source vs target]
     SRC --> CMP{source != target?}
@@ -92,16 +90,9 @@ if target_level.interconnect == "off_chip":
 
 ---
 
-## Step 3 — Scratch hits and retention (no extra hops)
+## Step 3 — Scratch hits (no extra hops)
 
-Before comparing source/target, [`_handle_access`](../../src/dmsim/sim/engine.py) computes:
-
-```python
-scratch_hit = resident_level == target and resident_level != state.home_level
-```
-
-- **Scratch hit:** tensor cached in SBUF (home is HBM/LtRAM). If `source == target`, **no hop** — local access only.
-- **Retention failure** (non-scratch): may set `corrupt` and force a reload path `deepest → home` before the main access (see [04-hbm-traffic.md](04-hbm-traffic.md)).
+When a tensor is cached in SBUF but homed elsewhere (`resident == target != home`), a read with `source == target` is a **scratch hit** — local access only, no interconnect hop.
 
 ---
 
@@ -246,7 +237,7 @@ Merged multi-core traces (`merge_traces`) set **`core_id`** on each core’s `ke
 
 | Function | File | Role |
 |----------|------|------|
-| `_handle_access` | [`engine.py`](../../src/dmsim/sim/engine.py) | Source/target, scratch, corrupt reload |
+| `_handle_access` | [`engine.py`](../../src/dmsim/sim/engine.py) | Source/target, StRAM direct read, scratch |
 | `_is_direct_stram_read` | [`engine.py`](../../src/dmsim/sim/engine.py) | StRAM home → local read, no hop |
 | `_charge_local_access` | [`engine.py`](../../src/dmsim/sim/engine.py) | Line-granularity local latency/energy |
 | `_source_level_for_access` | [`engine.py`](../../src/dmsim/sim/engine.py) | Writeback = SBUF source |

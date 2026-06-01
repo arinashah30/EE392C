@@ -29,13 +29,13 @@ levels:
     enabled: true
     tech: edram_1t1c
     scope: per_core
-    capacity_bytes: 33554432
+    capacity_bytes: 0
 
   - id: ltram
     enabled: true
     tech: rram
     scope: per_chip
-    capacity_bytes: 1073741824
+    capacity_bytes: 0
 
   - id: hbm
     enabled: true
@@ -50,3 +50,7 @@ area_budget:
   enabled: true
   nominal_sbuf_bytes_per_core: 29360128
   nominal_hbm_gib_per_chip: 96
+  # ~32 MiB StRAM/core (matches prior fixed-capacity floorplan trade)
+  stram_replaces_sbuf_fraction: 0.253506
+  # ~1 GiB LtRAM at RRAM density (small HBM area trade)
+  ltram_replaces_hbm_fraction: 0.0000572917

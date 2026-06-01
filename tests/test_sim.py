@@ -52,60 +52,6 @@ def test_diff_mem_reduces_hbm_traffic(trace: Trace) -> None:
     assert candidate.hbm_traffic_bytes < baseline.hbm_traffic_bytes
 
 
-def test_retention_corrupts_stale_stram() -> None:
-    hierarchy = load_hierarchy(
-        ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
-    )
-    policy = load_policy(ROOT / "configs/policies/decode_tiered.yaml")
-    trace = Trace(
-        metadata=TraceMetadata(workload="retention_test"),
-        tensors=[
-            TensorRecord(
-                id="kv",
-                name="kv_cache",
-                bytes=4096,
-                category=TensorCategory.KV_CACHE,
-            ),
-            TensorRecord(
-                id="w",
-                name="weight",
-                bytes=16_000_000,
-                category=TensorCategory.WEIGHT,
-            ),
-        ],
-        events=[
-            AccessEvent(
-                t_ns=0,
-                tensor_id="kv",
-                op="read",
-                bytes=4096,
-                target_level="sbuf",
-            ).model_dump(),
-            KernelBoundaryEvent(
-                type="kernel_end", t_ns=1000.0, kernel_id=1
-            ).model_dump(),
-            # Burn interconnect time without re-touching StRAM (kv home).
-            AccessEvent(
-                t_ns=2_000_000,
-                tensor_id="w",
-                op="read",
-                bytes=16_000_000,
-                target_level="sbuf",
-            ).model_dump(),
-            AccessEvent(
-                t_ns=5_000_000,
-                tensor_id="kv",
-                op="read",
-                bytes=4096,
-                target_level="sbuf",
-            ).model_dump(),
-        ],
-    )
-    result = run_simulation(trace, hierarchy, policy)
-    assert result.retention_evictions >= 1
-    assert result.corrupt_accesses >= 1
-
-
 def test_kernel_wipe_forces_reload(trace: Trace) -> None:
     hierarchy = load_hierarchy(
         ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
@@ -285,7 +231,7 @@ def test_stram_read_to_sbuf_is_local_not_dma() -> None:
     stram = hierarchy.level_by_id("stram")
     from dmsim.sim.transfer import access_latency_ns
 
-    assert result.total_time_ns == access_latency_ns(stram, "read", 8192)
+    assert result.total_time_ns == access_latency_ns(stram, "read", 8192, hierarchy)
 
 
 def test_hbm_homed_access_single_hop_on_baseline_stack() -> None:

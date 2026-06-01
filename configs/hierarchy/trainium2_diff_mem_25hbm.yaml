@@ -1,5 +1,5 @@
 name: trainium2_diff_mem_25hbm
-description: LtRAM takes 25% of nominal HBM capacity (full SBUF; StRAM disabled)
+description: LtRAM takes 25% of nominal HBM die area (full SBUF; StRAM disabled)
 instance: configs/instances/trn2_3xlarge.yaml
 
 interconnect:

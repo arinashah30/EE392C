@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from dmsim.config.loader import load_hierarchy
-from dmsim.sim.transfer import hops_between, path_between, transfer_latency_ns
+from dmsim.sim.transfer import (
+    datapath_read_latency_ns,
+    hops_between,
+    path_between,
+    transfer_latency_ns,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,3 +83,16 @@ def test_transfer_latency_uses_access_latencies_plus_bytes_over_bw() -> None:
         + sbuf.tech.access.write_latency_ns
     )
     assert lat == expected
+
+
+def test_datapath_read_uses_tech_max_bandwidth_not_dma() -> None:
+    hierarchy = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
+    )
+    sbuf = hierarchy.level_by_id("sbuf")
+    nbytes = 8192
+    lat = datapath_read_latency_ns(sbuf, nbytes, hierarchy)
+    assert lat == sbuf.tech.access.read_latency_ns + nbytes / hierarchy.on_chip_bandwidth_GBs
+    assert lat < transfer_latency_ns(
+        hierarchy, hierarchy.level_by_id("hbm"), sbuf, nbytes
+    )

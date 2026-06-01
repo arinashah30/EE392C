@@ -31,8 +31,6 @@ class SimulationResult:
     time_by_core_ns: dict[int, float] = field(default_factory=dict)
     hbm_read_bytes: int = 0
     hbm_write_bytes: int = 0
-    retention_evictions: int = 0
-    corrupt_accesses: int = 0
     kernel_wipes: int = 0
     refresh_energy_pJ: float = 0.0
     refresh_cycles_by_level: dict[str, int] = field(default_factory=dict)
@@ -118,7 +116,6 @@ def run_simulation(
                 pools,
                 fast_buffers,
                 result,
-                deepest,
             )
 
     result.total_time_ns = max(result.time_by_core_ns.values()) if result.time_by_core_ns else 0.0
@@ -144,20 +141,14 @@ def _apply_refresh_energy_between(
 
     for level in hierarchy.enabled_levels:
         tech = level.tech
-        interval_s = tech.refresh_interval_s
+        interval_s = level.effective_refresh_interval_s
         if interval_s is None:
-            if not tech.volatile:
-                continue
-            if not tech.retention_s or tech.retention_s <= 0:
-                continue
-            interval_s = tech.retention_s
-        if interval_s <= 0:
             continue
         interval_ns = interval_s * 1e9
         energy_pJ_per_bit = (
             tech.refresh_energy_pJ_per_bit
             if tech.refresh_energy_pJ_per_bit is not None
-            else tech.access.write_energy_pJ_per_bit
+            else (tech.access.read_energy_pJ_per_bit + tech.access.write_energy_pJ_per_bit)
         )
 
         if level.scope == "per_core":
@@ -300,8 +291,8 @@ def _is_direct_stram_read(
     """
     Trace loads into SBUF but tensor is homed in StRAM and resident at home.
 
-    Charge ``access_latency_ns(stram)`` — same line-local model as SBUF scratch
-    hits, no interconnect ``nbytes/BW`` term.
+    Charge datapath read latency at StRAM (``datapath_read_latency_ns``), same
+    model as SBUF scratch hits — not a DMA ``stram→sbuf`` hop.
     """
     if event.op != "read":
         return False
@@ -353,9 +344,9 @@ def _handle_kernel_boundary(
             if level_id in fast_buffers.get(core_id, {}):
                 fast_buffers[core_id][level_id].clear()
     for tensor_id, state in residency.items():
-        if state.resident_level not in wipe_ids:
+        if _tensor_core_id(tensor_map, tensor_id) not in core_set:
             continue
-        if _tensor_core_id(tensor_map, tensor_id) in core_set:
+        if state.resident_level in wipe_ids:
             state.resident_level = state.home_level
     result.kernel_wipes += 1
 
@@ -369,7 +360,6 @@ def _handle_access(
     pools: dict[str, LevelPoolState],
     fast_buffers: dict[int, dict[str, FastBufferState]],
     result: SimulationResult,
-    deepest: str,
 ) -> None:
     tensor = tensor_map.get(event.tensor_id)
     if tensor is None:
@@ -380,39 +370,12 @@ def _handle_access(
     nbytes = event.bytes
     core_id = event.core_id
 
-    resident_level = state.resident_level or state.home_level
-    scratch_hit = resident_level == target and resident_level != state.home_level
     source_level = _source_level_for_access(event, state, policy, hierarchy)
-
-    if not scratch_hit and _check_retention_expired(state, hierarchy, event.t_ns):
-        state.corrupt = True
-        result.retention_evictions += 1
-        state.resident_level = None
-
-    if state.corrupt:
-        result.corrupt_accesses += 1
-        source_level = state.home_level
-        reload_from = deepest
-        _charge_path(
-            hierarchy,
-            reload_from,
-            state.home_level,
-            nbytes,
-            result,
-            home_level=state.home_level,
-            core_id=core_id,
-            count_hbm=True,
-        )
-        state.corrupt = False
-        state.resident_level = state.home_level
-        _touch_home(state, event.t_ns)
-        source_level = state.home_level
 
     if _is_direct_stram_read(event, state, policy):
         _charge_local_access(
             hierarchy, state.home_level, "read", nbytes, core_id, result
         )
-        _touch_home(state, event.t_ns)
         return
 
     if source_level != target:
@@ -430,8 +393,6 @@ def _handle_access(
             hierarchy, fast_buffers, core_id, target, event.tensor_id, nbytes, pools, residency
         )
         state.resident_level = target
-        if source_level == state.home_level:
-            _touch_home(state, event.t_ns)
     else:
         # Same-level writes (e.g. SBUF scratch hit after SB→OUTPUT ingest) are
         # in-place touches — no separate DMA on Trainium; skip local cost.
@@ -440,8 +401,6 @@ def _handle_access(
         _charge_local_access(
             hierarchy, target, event.op, nbytes, core_id, result
         )
-        if target == state.home_level:
-            _touch_home(state, event.t_ns)
 
 
 def _charge_local_access(
@@ -454,31 +413,11 @@ def _charge_local_access(
 ) -> None:
     """Line-granularity local read/write (SBUF scratch hits, direct StRAM reads)."""
     level = hierarchy.level_by_id(level_id)
-    lat = access_latency_ns(level, op, nbytes)
+    lat = access_latency_ns(level, op, nbytes, hierarchy)
     eng = access_energy_pJ(level, op, nbytes)
     _add_core_latency(result, core_id, lat)
     result.total_energy_pJ += eng
     _accumulate_level(result, level_id, lat, eng)
-
-
-def _touch_home(state: TensorResidency, t_ns: float) -> None:
-    """Refresh retention timer at the persistent home tier (not SBUF/PSUM scratch)."""
-    state.last_home_touch_ns = t_ns
-
-
-def _check_retention_expired(
-    state: TensorResidency,
-    hierarchy: ResolvedHierarchy,
-    t_ns: float,
-) -> bool:
-    if state.last_home_touch_ns is None:
-        return False
-    level = hierarchy.level_by_id(state.home_level)
-    if not level.has_retention:
-        return False
-    assert level.tech.retention_s is not None
-    elapsed_s = (t_ns - state.last_home_touch_ns) * 1e-9
-    return elapsed_s > level.tech.retention_s
 
 
 def _deepest_enabled(hierarchy: ResolvedHierarchy) -> str:

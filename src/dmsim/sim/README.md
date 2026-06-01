@@ -167,8 +167,7 @@ Every interconnect move is **one direct hop** between source and destination lev
 | **Kernel wipe** | On traced `kernel_end`, clear SBUF/PSUM and reset `resident_level` to home |
 | **Local hit** | `source_level == target_level` — no interconnect; local latency/energy only |
 | **Writeback** | Trace `write` to off-chip `target_level` — modeled as **`sbuf → target`** (SBUF flush) |
-| **Touch home** | Update `last_home_touch_ns` when the **home** tier is read (not on SBUF-only scratch hits) |
-| **Scratch hit** | `resident == target != home` (e.g. SBUF cache) — local access only, no retention |
+| **Scratch hit** | `resident == target != home` (e.g. SBUF cache) — datapath read at SBUF (`on_chip_bandwidth_GBs`) |
 
 **Code:** `TensorRecord` / categories → [`trace/schema.py`](../trace/schema.py) · `TensorResidency` → [`residency.py`](residency.py) · routing → [`transfer.py`](transfer.py).
 
@@ -392,8 +391,6 @@ Defined [`residency.py`](residency.py) L7–11:
 class TensorResidency:
     home_level: str
     resident_level: str | None = None
-    last_home_touch_ns: float | None = None   # retention timer at home
-    corrupt: bool = False                      # home data stale → reload from HBM
     initialized_at_home: bool = False          # True after t=0 bootstrap
 ```
 
@@ -403,8 +400,6 @@ After a load access charges `ltram→sbuf`:
 residency["linear_weight_12"] = TensorResidency(
     home_level="ltram",        # unchanged
     resident_level="sbuf",
-    last_home_touch_ns=1205000.0,
-    corrupt=False,
 )
 ```
 
@@ -570,13 +565,13 @@ On an interconnect move (`source_level != target`), `_charge_path` calls [`path_
 | **`total_time_ns`** | **`max(time_by_core_ns)`** — worst-case core (cores assumed parallel) |
 | **`latency_by_level_ns`** | **Sum chip-wide** — accounting breakdown, not wall-clock |
 | **`total_energy_pJ`** | **Sum chip-wide** |
-| **`hbm_*_bytes`, `corrupt_accesses`** | **Sum chip-wide** |
+| **`hbm_*_bytes`** | **Sum chip-wide** |
 
-Trace `t_ns` is used for **event order** and **retention/refresh** gaps, not for adding latency into `total_time_ns`.
+Trace `t_ns` is used for **event order** and **refresh-energy** accounting between events, not for adding latency into `total_time_ns`.
 
 ### Bandwidth (DMA vs on-chip)
 
-Device tech `max_bandwidth_GBs` and legacy `links_GBs` are **not** used for transfer time.
+Interconnect hops use `link_bandwidth_GBs` (DMA vs on-chip). **Datapath reads** (SBUF scratch, StRAM direct read) use `on_chip_bandwidth_GBs` via `datapath_read_latency_ns` — not DMA and not tech `max_bandwidth_GBs`.
 
 `dma_bandwidth_GBs` and `on_chip_bandwidth_GBs` in hierarchy YAML are **per NeuronCore** (each hop’s `nbytes/BW` uses that core’s rate).
 
@@ -603,15 +598,20 @@ link_bandwidth_GBs("ltram", "stram") # → 368
 | Function | When used |
 |----------|-----------|
 | `transfer_latency_ns` / `transfer_energy_pJ` | **One** adjacent hop in `_charge_path` |
-| `_charge_local_access` → `access_latency_ns` / `access_energy_pJ` | SBUF scratch hits, local at home, **StRAM direct read** |
+| `_charge_local_access` → `datapath_read_latency_ns` / `access_energy_pJ` | SBUF scratch hits, **StRAM direct read** |
+| `_charge_local_access` → `access_latency_ns` (writes) | Line-granularity local writes if charged |
 
-Single-hop latency:
+Interconnect hop:
 
 ```text
-read_latency(source) + nbytes / bandwidth + write_latency(dest)
+read_latency(source) + nbytes / link_bandwidth_GBs + write_latency(dest)
 ```
 
-`bandwidth` from [`ResolvedHierarchy.link_bandwidth_GBs`](../config/models.py) using the table above.
+Datapath read (scratch / StRAM direct):
+
+```text
+read_latency(level) + nbytes / on_chip_bandwidth_GBs
+```
 
 ### `_charge_path` accounting
 
@@ -622,18 +622,9 @@ For **each** hop in `path_between(source, dest)` (always zero or one direct edge
 3. Split 50/50 into `latency_by_level_ns` / `energy_by_level_pJ`
 4. If the hop touches **hbm**: update `hbm_read_bytes` / `hbm_write_bytes`
 
-### Retention and `_touch_home`
+### Background refresh
 
-**Retention** applies to the **home** tier (e.g. StRAM eDRAM with `retention_s` in the tech spec). SBUF/PSUM are scratch buffers wiped on `kernel_end`.
-
-| Situation | Retention check? | `_touch_home`? |
-|-----------|------------------|----------------|
-| **SBUF scratch hit** (`resident == target == sbuf`, home ≠ sbuf) | No — serving cached scratch | No |
-| **Load from home** (`source == home` on interconnect) | Yes | Yes (home was read) |
-| **Local hit at home** | Yes | Yes |
-| **Corrupt reload** (HBM → home) | Yes | Yes |
-
-`_touch_home` only updates `last_home_touch_ns` when the persistent **home** copy is accessed, not when an access only touches SBUF.
+**Refresh** (`_apply_refresh_energy_between`) charges energy at `effective_refresh_interval_s` (from `configs/tech_specs/`, overridable per level in hierarchy YAML) for occupied bytes between trace events. StRAM is assumed refreshed often enough that data does not expire; there is no corrupt-reload path.
 
 ---
 
@@ -662,27 +653,16 @@ Given:
 | Step | Behavior |
 |------|----------|
 | Lookup tensor / residency | `TensorResidency` for `tensor_id` |
-| Scratch hit? | `resident == target != home` → skip retention; local access only |
+| Scratch hit? | `resident == target != home` → local access only when `source == target` |
 | **Source level** | [`_source_level_for_access`](engine.py): reads use `resident`; **off-chip writes** use `sbuf` |
-| Retention | [`_check_retention_expired`](engine.py) vs trace `t_ns` when not scratch hit |
-| Corrupt reload | `deepest → home`, then continue |
 | **StRAM direct read?** | [`_is_direct_stram_read`](engine.py): home+resident at `stram`, read to SBUF → `_charge_local_access(stram)`, return |
 | Transfer vs local | `_charge_path` if `source != target`; else local read or **omit same-level write** |
-| Touch home | [`_touch_home`](engine.py) when home tier is read on interconnect or StRAM direct read |
 
 **Direction** is `(source) → target`. Loads use `resident` (or home after wipe). Trace **`write` to an off-chip `target_level`** is modeled as **`sbuf → target`** (SBUF flush), even when `resident_level` is already at home. On-chip writes (`target_level: sbuf`) still use `resident`.
 
 ### Flow diagram
 
 ```text
-                    ┌─────────────────────────┐
-                    │ Retention expired?      │
-                    └───────────┬─────────────┘
-                          yes   │   no
-                    ┌───────────▼───────────┐
-                    │ deepest → home reload │
-                    └───────────┬───────────┘
-                                │
                     ┌───────────▼───────────┐
                     │ StRAM direct read?    │
                     └───────────┬───────────┘
@@ -732,7 +712,7 @@ Defined [`engine.py`](engine.py) L26–45. Returned by `run_simulation` (L109). 
 | `hbm_traffic_bytes` | property: read + write |
 | `transfers_by_hop` | Count per logical hop key (`ltram->sbuf`) |
 | `energy_by_level_pJ`, `latency_by_level_ns` | Per-tier breakdown |
-| `kernel_wipes`, `retention_evictions`, `corrupt_accesses` | Event counters |
+| `kernel_wipes` | Event counter |
 | `refresh_energy_pJ`, `refresh_cycles_by_level` | Background refresh between trace timestamps |
 
 Example:
@@ -755,8 +735,6 @@ SimulationResult(
     energy_by_level_pJ={"sbuf": 2.1e11, "ltram": 4.5e11, "hbm": 3.2e11},
     latency_by_level_ns={"sbuf": 1.2e8, "ltram": 2.0e8},
     kernel_wipes=32,
-    retention_evictions=0,
-    corrupt_accesses=0,
 )
 ```
 
@@ -791,7 +769,7 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 
 | Symbol | Lines | Role |
 |--------|-------|------|
-| `TensorResidency` | L7–11 | `home_level`, `resident_level`, retention fields |
+| `TensorResidency` | L7–11 | `home_level`, `resident_level`, `initialized_at_home` |
 | `FastBufferState` | L15–23 | Per-core SBUF/PSUM occupancy; `clear()` |
 | `LevelPoolState` | L27–44 | Chip-wide pool; `can_fit`, `install`, `remove` |
 
@@ -807,7 +785,8 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 | `transfer_energy_pJ` | — | Single direct link energy |
 | `transfer_latency_between_levels` | — | Direct transfer latency |
 | `transfer_energy_between_levels` | — | Direct transfer energy |
-| `access_latency_ns` | — | Local access latency |
+| `datapath_read_latency_ns` | — | SBUF/StRAM read to compute (`on_chip_bandwidth_GBs`) |
+| `access_latency_ns` | — | Local access (datapath read or line-granularity write) |
 | `access_energy_pJ` | — | Local access energy |
 
 ### [`sim/engine.py`](engine.py)
@@ -832,9 +811,7 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 | `_charge_path` | — | `path_between` + per-core latency + HBM bytes |
 | `_install_in_fast_buffer` | — | SBUF occupancy; evict without writeback |
 | `_evict_from_fast_buffer` | — | Drop one SBUF occupant; resident ← home |
-| `_check_retention_expired` | — | StRAM-style retention (trace `t_ns`) |
-| `_touch_home` | — | Update `last_home_touch_ns` |
-| `_deepest_enabled` | — | Deepest enabled tier (corrupt reload from) |
+| `_deepest_enabled` | — | Deepest enabled tier (bootstrap / spill) |
 
 ### [`policies/placement.py`](../policies/placement.py)
 
