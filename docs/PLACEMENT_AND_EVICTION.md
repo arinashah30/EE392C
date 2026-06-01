@@ -64,38 +64,39 @@ For each access event (in time order):
 
 1. Figure out where data is now (**home**, unless it was recently loaded into SBUF).
 2. The trace says where it needs to go (almost always **SBUF**).
-3. If those differ → **charge time and energy** to move bytes along the memory stack.
-4. If already in SBUF → only charge a **cheap local** access.
+3. If those differ → **charge time and energy** for **one direct hop** (`source → target`). Multi-tier staging must appear as separate trace events.
+4. If already at target (SBUF scratch hit, StRAM direct read, or same-level read) → **cheap local** access via `_charge_local_access`.
+5. Same-level **writes** to SBUF are **omitted** (no cost).
 
-**HBM traffic** in the report counts bytes that cross **into or out of HBM** on that path.
+**HBM traffic** in the report counts bytes that cross **into or out of HBM** on charged interconnect hops.
 
 ### How transfer hops are computed
 
-Code: `_charge_path` in `src/dmsim/sim/engine.py` uses **`path_between`** (home-aware), then charges **one** link per logical hop with `transfer_latency_ns` / `transfer_energy_pJ`.
+Code: `_charge_path` in `src/dmsim/sim/engine.py` calls **`path_between`**, which returns **one direct edge** `(source, dest)` — it does **not** walk intermediate YAML levels. The optional `home_id` argument is **ignored**.
 
-Example: weight **home = LtRAM**, load to SBUF → logical hop **`ltram → sbuf` only** (not `ltram → stram → sbuf`, not via HBM).
+Example: weight **home = LtRAM**, load to SBUF → **`ltram → sbuf` only** (not `ltram → stram → sbuf`, not via HBM).
 
 | Tensor home | Hop charged (time & energy) |
 |-------------|-----------------------------|
 | HBM | `hbm → sbuf` |
 | LtRAM | `ltram → sbuf` |
-| StRAM | `stram → sbuf` |
+| StRAM | **Local read at StRAM** when homed+resident there — **not** `stram → sbuf` |
 
-`physical_hops_between` in `transfer.py` still exists for tests/tools that need the full linear stack walk; the simulator does **not** use it for access costing anymore.
+`physical_hops_between` in `transfer.py` is a **backward-compatible alias** of `hops_between` (same direct-edge behavior).
 
 ### Transfer time and bandwidth
 
 Per hop: `read_latency + nbytes / bandwidth + write_latency` (`transfer_latency_ns`).
 
-- **Unspecified hops** default to **Trainium DMA** (`16 × 23 B/ns ≈ 368 GB/s`), then `min(link, 368)` when `dma_cap_transfer_bandwidth: true`. LtRAM→SBUF and HBM→SBUF use this unless you override `links_GBs`.
-- **Literature macro bandwidths** live in `configs/tech_specs/*.yaml` as `max_bandwidth_GBs`. They do **not** automatically slow every hop (RRAM 2.3 GB/s is a crossbar read rate, not the NeuronCore DMA delivery path). To model a macro-limited hop, set it in hierarchy YAML (e.g. `stram_sbuf: 128` for 1T1C eDRAM).
+Bandwidth is **not** taken from tech-spec `max_bandwidth_GBs` or per-link `links_GBs`. Hierarchy YAML sets:
 
-| Tech file | Macro `max_bandwidth_GBs` | Typical explicit link |
-|-----------|---------------------------|------------------------|
-| `edram_1t1c.yaml` | 128 GB/s aggregate | `stram_sbuf: 128` |
-| `edram_3t.yaml` | 128 GB/s | `stram_sbuf: 128` (3T StRAM) |
-| `rram.yaml` | 2.3 GB/s read | optional `ltram_sbuf: 2.3` for array-limited study |
-| `feram.yaml` | 34 GB/s | optional `stram_sbuf: 34` if FeRAM StRAM |
+```yaml
+interconnect:
+  dma_bandwidth_GBs: 368        # off-chip ↔ anything
+  on_chip_bandwidth_GBs: 10000  # on-chip ↔ on-chip only
+```
+
+Each level is **`on_chip`** (PSUM, SBUF, StRAM) or **`off_chip`** (HBM, LtRAM). For a hop, if **both** endpoints are on-chip → on-chip BW; otherwise → DMA BW.
 
 Neuron profile `dma[].duration` is **not** used for latency today.
 
@@ -103,14 +104,25 @@ Neuron profile `dma[].duration` is **not** used for latency today.
 
 ## Three ways data gets kicked out or reset
 
-### 1. End of kernel — SBUF cleared (main one)
+### 1. End of kernel — SBUF/PSUM cleared (main one)
 
-After every **`kernel_end`** in the trace:
+After every **`kernel_end`** in the trace (for the affected NeuronCore(s)):
 
-- **SBUF and PSUM are wiped** on that core.
-- Tensors are considered back at **home** (not sitting in SBUF anymore).
+- **SBUF and PSUM are wiped** on that core (levels in `kernel.wipe_levels_on_boundary`).
+- **`resident_level`** resets to **home** only for tensors on the **same core(s)** whose resident tier was wiped.
 
-So **every kernel** that needs SBUF data pays the **full load from home** again. The simulator does **not** keep hot data in SBUF across kernels.
+**Core scope** (both fast buffers and residency use the same rule):
+
+| `kernel_end.core_id` | Effect |
+|----------------------|--------|
+| Set (e.g. `0`) | Core 0 only |
+| Omitted (`null`) | All cores that already have fast-buffer state (typical single-core ingest) |
+
+Multi-core merged traces set `core_id` per core in [`merge_traces`](../../src/dmsim/trace/neuron_json_ingest.py).
+
+**StRAM and LtRAM are not wiped** by default — near-memory homes persist across kernels on every core. StRAM-homed KV stays at StRAM; reads to SBUF use the **StRAM direct read** path (local, not `stram→sbuf`).
+
+So **every kernel** that needs SBUF data from HBM/LtRAM pays the **full load from home** again after that core’s wipe. Other cores’ SBUF scratch can remain hot until their own `kernel_end`.
 
 Configured in hierarchy YAML: `kernel.wipe_levels_on_boundary: [psum, sbuf]`.
 

@@ -9,6 +9,7 @@ class TensorResidency:
     resident_level: str | None = None
     last_home_touch_ns: float | None = None
     corrupt: bool = False
+    initialized_at_home: bool = False
 
 
 @dataclass

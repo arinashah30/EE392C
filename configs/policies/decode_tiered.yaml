@@ -7,5 +7,12 @@ home_level_by_category:
   activation: stram
   other: hbm
 
-# Fast levels used for compute-side accesses in traces
 default_access_target: sbuf
+
+fallback_by_level:
+  psum: sbuf
+  sbuf: hbm
+  stram: ltram
+  ltram: hbm
+
+spill_victim_order: best_case

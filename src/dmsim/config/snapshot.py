@@ -31,7 +31,10 @@ def hierarchy_snapshot(
         "area_budget": hierarchy.area_budget.model_dump(),
         "area_budget_notes": dict(hierarchy.area_budget_notes),
         "levels": levels,
-        "links_GBs": dict(hierarchy.links_GBs),
+        "interconnect": hierarchy.interconnect.model_dump(),
+        "level_interconnect": {
+            level.id: level.interconnect for level in hierarchy.levels if level.enabled
+        },
         "kernel": hierarchy.kernel.model_dump(),
     }
 
@@ -42,6 +45,8 @@ def policy_snapshot(policy: PolicyConfig, policy_path: Path | None = None) -> di
         "policy_name": policy.name,
         "home_level_by_category": dict(policy.home_level_by_category),
         "default_access_target": policy.default_access_target,
+        "fallback_by_level": dict(policy.fallback_by_level),
+        "spill_victim_order": policy.spill_victim_order,
     }
 
 

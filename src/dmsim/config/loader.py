@@ -8,11 +8,25 @@ from dmsim.config.area_budget import apply_area_budget
 from dmsim.config.models import (
     HierarchyConfig,
     InstanceSpec,
+    InterconnectConfig,
+    InterconnectDomain,
+    LevelConfig,
     PolicyConfig,
     ResolvedHierarchy,
     ResolvedLevel,
     TechnologySpec,
 )
+
+
+def _resolve_interconnect(
+    level_id: str, interconnect: InterconnectConfig
+) -> InterconnectDomain:
+    domain = interconnect.level_domain.get(level_id)
+    if domain is None:
+        raise ValueError(
+            f"level {level_id!r} missing from interconnect.level_domain in hierarchy YAML"
+        )
+    return domain
 
 
 def _repo_root(start: Path | None = None) -> Path:
@@ -72,6 +86,8 @@ def load_hierarchy(
     with path.open() as handle:
         raw = yaml.safe_load(handle)
     config = HierarchyConfig.model_validate(raw)
+    for level in config.levels:
+        _resolve_interconnect(level.id, config.interconnect)
 
     instance_path = (
         _resolve_path(root, config.instance)
@@ -92,6 +108,7 @@ def load_hierarchy(
                     tech=load_tech_spec(tech_root / f"{level.tech}.yaml"),
                     scope=level.scope,
                     capacity_bytes=level.capacity_bytes or 0,
+                    interconnect=_resolve_interconnect(level.id, config.interconnect),
                     enabled=False,
                 )
             )
@@ -114,6 +131,7 @@ def load_hierarchy(
                 tech=tech,
                 scope=level.scope,
                 capacity_bytes=capacity,
+                interconnect=_resolve_interconnect(level.id, config.interconnect),
                 enabled=True,
             )
         )
@@ -125,9 +143,10 @@ def load_hierarchy(
         name=config.name,
         instance=instance,
         levels=resolved,
-        links_GBs=config.links_GBs,
+        interconnect=config.interconnect,
         kernel=config.kernel,
         area_budget=config.area_budget,
+        num_cores=cores,
         tech_dir=tech_root,
         repo_root=root,
     )

@@ -46,6 +46,17 @@ class InstanceSpec(BaseModel):
     dma_cap_transfer_bandwidth: bool = True
 
 
+InterconnectDomain = Literal["on_chip", "off_chip"]
+
+
+class InterconnectConfig(BaseModel):
+    """Per-core transfer bandwidth and level domain (see hierarchy YAML ``interconnect:``)."""
+
+    dma_bandwidth_GBs: float
+    on_chip_bandwidth_GBs: float
+    level_domain: dict[str, InterconnectDomain]
+
+
 class LevelConfig(BaseModel):
     id: str
     enabled: bool = True
@@ -55,6 +66,15 @@ class LevelConfig(BaseModel):
 
 
 class KernelConfig(BaseModel):
+    """Levels cleared on traced ``kernel_end`` (fast-buffer occupants + resident reset).
+
+    Default: ``[psum, sbuf]`` only. Near-memory homes (``stram``, ``ltram``) and ``hbm``
+    persist unless explicitly listed. Add a level id here to wipe it each kernel boundary.
+
+    Wipe scope follows ``KernelBoundaryEvent.core_id``: one NeuronCore when set, or every
+    core that already has fast-buffer state when ``core_id`` is omitted (single-core ingest).
+    """
+
     wipe_levels_on_boundary: list[str] = Field(default_factory=lambda: ["psum", "sbuf"])
 
 
@@ -75,7 +95,7 @@ class HierarchyConfig(BaseModel):
     name: str
     description: str | None = None
     instance: str | None = None
-    links_GBs: dict[str, float] = Field(default_factory=dict)
+    interconnect: InterconnectConfig
     levels: list[LevelConfig]
     kernel: KernelConfig = Field(default_factory=KernelConfig)
     area_budget: AreaBudgetConfig = Field(default_factory=AreaBudgetConfig)
@@ -93,6 +113,14 @@ class PolicyConfig(BaseModel):
     description: str | None = None
     home_level_by_category: dict[str, str]
     default_access_target: str = "sbuf"
+    # When a level is disabled or over capacity, spill/fallback to this target.
+    # Unlisted levels default to hbm.
+    fallback_by_level: dict[str, str] = Field(default_factory=dict)
+    # best_case: spill least-accessed tensors first; worst_case: most-accessed first.
+    spill_victim_order: Literal["best_case", "worst_case"] = "best_case"
+
+    def fallback_for(self, level_id: str) -> str:
+        return self.fallback_by_level.get(level_id, "hbm")
 
 
 class ResolvedLevel(BaseModel):
@@ -101,6 +129,7 @@ class ResolvedLevel(BaseModel):
     tech: TechnologySpec
     scope: Literal["per_core", "per_chip", "global"]
     capacity_bytes: int
+    interconnect: InterconnectDomain
     enabled: bool = True
 
     @property
@@ -112,9 +141,10 @@ class ResolvedHierarchy(BaseModel):
     name: str
     instance: InstanceSpec
     levels: list[ResolvedLevel]
-    links_GBs: dict[str, float]
+    interconnect: InterconnectConfig
     kernel: KernelConfig
     area_budget: AreaBudgetConfig
+    num_cores: int = 1
     area_budget_notes: dict[str, str] = Field(default_factory=dict)
     tech_dir: Path
     repo_root: Path
@@ -135,29 +165,20 @@ class ResolvedHierarchy(BaseModel):
         return self.level_by_id(level_id).index
 
     @property
-    def dma_aggregate_bandwidth_GBs(self) -> float:
-        """16 engines × 23 B/ns ≈ 368 GB/s per NeuronCore (Trainium2)."""
-        return (
-            self.instance.dma_bytes_per_ns_per_engine
-            * self.instance.dma_engines_per_neuron_core
-        )
+    def dma_bandwidth_GBs(self) -> float:
+        return self.interconnect.dma_bandwidth_GBs
+
+    @property
+    def on_chip_bandwidth_GBs(self) -> float:
+        return self.interconnect.on_chip_bandwidth_GBs
 
     def link_bandwidth_GBs(self, from_id: str, to_id: str) -> float:
-        """Effective GB/s for a hop between hierarchy levels.
-
-        Unspecified links default to the Trainium DMA aggregate (not min of tech
-        specs). Tech ``max_bandwidth_GBs`` is the memory-macro literature value;
-        set ``links_GBs`` explicitly (e.g. ``stram_sbuf: 128``) when a hop should
-        be macro-limited instead of DMA-limited.
-        """
-        key = f"{from_id}_{to_id}"
-        rev = f"{to_id}_{from_id}"
-        if key in self.links_GBs:
-            bw = self.links_GBs[key]
-        elif rev in self.links_GBs:
-            bw = self.links_GBs[rev]
-        else:
-            bw = self.dma_aggregate_bandwidth_GBs
-        if self.instance.dma_cap_transfer_bandwidth:
-            bw = min(bw, self.dma_aggregate_bandwidth_GBs)
-        return bw
+        """Per-core GB/s for one hop: on-chip if both on-chip, else DMA."""
+        from_level = self.level_by_id(from_id)
+        to_level = self.level_by_id(to_id)
+        if (
+            from_level.interconnect == "on_chip"
+            and to_level.interconnect == "on_chip"
+        ):
+            return self.on_chip_bandwidth_GBs
+        return self.dma_bandwidth_GBs

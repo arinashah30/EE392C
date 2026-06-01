@@ -2,15 +2,15 @@ name: trainium2_diff_mem_50sbuf_25hbm
 description: StRAM takes 50% of nominal SBUF capacity per core; LtRAM takes 25% of nominal HBM capacity
 instance: configs/instances/trn2_3xlarge.yaml
 
-links_GBs:
-  psum_sbuf: 2048
-  # Literature macro limits on tier hops (Trainium DMA still caps at 368 GB/s)
-  # Direct path to HBM controller (bypasses optional StRAM/LtRAM tiers).
-  hbm_sbuf: 2900
-  stram_sbuf: 128
-  sbuf_stram: 800
-  stram_ltram: 600
-  ltram_hbm: 2900
+interconnect:
+  dma_bandwidth_GBs: 368
+  on_chip_bandwidth_GBs: 10000
+  level_domain:
+    psum: on_chip
+    sbuf: on_chip
+    stram: on_chip
+    ltram: off_chip
+    hbm: off_chip
 
 levels:
   - id: psum

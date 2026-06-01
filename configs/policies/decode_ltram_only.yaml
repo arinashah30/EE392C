@@ -1,7 +1,7 @@
-name: baseline_hbm
-description: Baseline — persistent tensors live in HBM
+name: decode_ltram_only
+description: LLM decode placement — weights in LtRAM; everything else in HBM
 home_level_by_category:
-  weight: hbm
+  weight: ltram
   kv_cache: hbm
   hidden: hbm
   activation: hbm

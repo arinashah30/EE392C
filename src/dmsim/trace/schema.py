@@ -87,6 +87,18 @@ class Trace(BaseModel):
     def tensor_map(self) -> dict[str, TensorRecord]:
         return {tensor.id: tensor for tensor in self.tensors}
 
+    def access_counts(self) -> dict[str, int]:
+        """Count trace access events per tensor_id (for placement spill ordering)."""
+        counts: dict[str, int] = {}
+        for raw in self.events:
+            if raw.get("type") != "access":
+                continue
+            tensor_id = raw.get("tensor_id")
+            if not tensor_id:
+                continue
+            counts[tensor_id] = counts.get(tensor_id, 0) + 1
+        return counts
+
 
 def load_trace(path: Path) -> Trace:
     with path.open() as handle:

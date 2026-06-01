@@ -7,37 +7,27 @@ def level_order(hierarchy: ResolvedHierarchy) -> list[str]:
     return [level.id for level in hierarchy.enabled_levels]
 
 
-def physical_hops_between(
+def hops_between(
     hierarchy: ResolvedHierarchy,
     source_id: str,
     dest_id: str,
 ) -> list[tuple[str, str]]:
     """
-    Physical hops used for bandwidth/latency/energy accounting.
+    Direct memory-to-memory hop for a transfer.
 
-    If the hierarchy declares an explicit direct link between two levels
-    (e.g. `links_GBs: { hbm_sbuf: ... }`), we treat it as a direct hop.
-    Otherwise we fall back to walking the linear enabled-level order.
+    Transfers are one logical edge ``source → dest``. Multi-hop paths (e.g.
+    staging through LtRAM) must appear as separate trace access events, not as
+    an automatic walk along ``levels:`` order in YAML.
     """
-    # Prefer an explicit direct interconnect edge when present.
-    key = f"{source_id}_{dest_id}"
-    rev = f"{dest_id}_{source_id}"
-    if key in hierarchy.links_GBs or rev in hierarchy.links_GBs:
-        return [(source_id, dest_id)] if source_id != dest_id else []
-
-    order = level_order(hierarchy)
-    i = order.index(source_id)
-    j = order.index(dest_id)
-    if i == j:
+    if source_id == dest_id:
         return []
-    step = 1 if j > i else -1
-    hops: list[tuple[str, str]] = []
-    idx = i
-    while idx != j:
-        nxt = idx + step
-        hops.append((order[idx], order[nxt]))
-        idx = nxt
-    return hops
+    hierarchy.level_by_id(source_id)
+    hierarchy.level_by_id(dest_id)
+    return [(source_id, dest_id)]
+
+
+# Backward-compatible alias
+physical_hops_between = hops_between
 
 
 def path_between(
@@ -47,34 +37,9 @@ def path_between(
     *,
     home_id: str | None = None,
 ) -> list[tuple[str, str]]:
-    """
-    Logical transfer hops for a tensor access.
-
-    Only levels that are the source, destination, or persistent home appear
-    as endpoints. Intermediate tiers (e.g. StRAM/LtRAM) are skipped when data
-    is homed in HBM — matching a page table that routes directly from home.
-    """
-    order = level_order(hierarchy)
-    i = order.index(source_id)
-    j = order.index(dest_id)
-    if i == j:
-        return []
-
-    anchor = home_id if home_id is not None else source_id
-    anchors = {source_id, dest_id, anchor}
-    step = 1 if j > i else -1
-
-    waypoints: list[str] = []
-    idx = i
-    while True:
-        level_id = order[idx]
-        if level_id in anchors and (not waypoints or waypoints[-1] != level_id):
-            waypoints.append(level_id)
-        if idx == j:
-            break
-        idx += step
-
-    return list(zip(waypoints, waypoints[1:]))
+    """Hops used for access costing in ``_charge_path`` (always one direct edge)."""
+    _ = home_id
+    return hops_between(hierarchy, source_id, dest_id)
 
 
 def transfer_latency_ns(
@@ -125,13 +90,10 @@ def transfer_latency_between_levels(
     dest_id: str,
     nbytes: int,
 ) -> float:
-    """Sum latency across every adjacent physical link between two levels (full stack walk)."""
-    total = 0.0
-    for hop_from, hop_to in physical_hops_between(hierarchy, source_id, dest_id):
-        from_level = hierarchy.level_by_id(hop_from)
-        to_level = hierarchy.level_by_id(hop_to)
-        total += transfer_latency_ns(hierarchy, from_level, to_level, nbytes)
-    return total
+    """Latency for one direct transfer between levels."""
+    from_level = hierarchy.level_by_id(source_id)
+    to_level = hierarchy.level_by_id(dest_id)
+    return transfer_latency_ns(hierarchy, from_level, to_level, nbytes)
 
 
 def transfer_energy_between_levels(
@@ -140,10 +102,7 @@ def transfer_energy_between_levels(
     dest_id: str,
     nbytes: int,
 ) -> float:
-    """Sum energy across every adjacent physical link between two levels (full stack walk)."""
-    total = 0.0
-    for hop_from, hop_to in physical_hops_between(hierarchy, source_id, dest_id):
-        from_level = hierarchy.level_by_id(hop_from)
-        to_level = hierarchy.level_by_id(hop_to)
-        total += transfer_energy_pJ(hierarchy, from_level, to_level, nbytes)
-    return total
+    """Energy for one direct transfer between levels."""
+    from_level = hierarchy.level_by_id(source_id)
+    to_level = hierarchy.level_by_id(dest_id)
+    return transfer_energy_pJ(hierarchy, from_level, to_level, nbytes)
