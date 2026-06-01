@@ -14,10 +14,12 @@ def _density(level: ResolvedLevel, fallback: float | None) -> float:
 
 
 def _bytes_for_area(area_um2: float, density_bits_per_um2: float) -> int:
+    """capacity_bytes = area_um² × density_bits_per_um² / 8"""
     return int(area_um2 * density_bits_per_um2 / 8)
 
 
 def _area_for_bytes(capacity_bytes: int, density_bits_per_um2: float) -> float:
+    """area_um² = capacity_bytes × 8 / density_bits_per_um²"""
     return (capacity_bytes * 8) / density_bits_per_um2
 
 
@@ -30,11 +32,15 @@ def _split_by_area_fraction(
     pool_scale: int = 1,
 ) -> tuple[int, int, float, float]:
     """
-    Constant-area trade: ``replace_area_fraction`` of the A pool's die area hosts B.
+    Iso-area trade: fraction ``replace_area_fraction`` of donor pool A's die area
+    is repurposed for recipient B; capacities follow tech density.
 
-    ``pool_scale`` multiplies A capacity when sizing the shared area pool (e.g. all
-    cores' SBUF when StRAM is per_chip). Returned ``capacity_a`` is always in the
-    same units as ``nominal_capacity_a`` (per-core or per-chip).
+    - ``area_pool = _area_for_bytes(nominal_capacity_a * pool_scale, density_a)``
+    - ``capacity_b = _bytes_for_area(replace_area_fraction * area_pool, density_b)``
+    - ``capacity_a = int(nominal_capacity_a * (1 - replace_area_fraction))``
+
+    ``pool_scale`` sizes the shared area pool (e.g. all cores' SBUF when StRAM is
+    per_chip). Returned ``capacity_a`` uses the same units as ``nominal_capacity_a``.
     """
     total_capacity_a = nominal_capacity_a * pool_scale
     total_area = _area_for_bytes(total_capacity_a, density_a)
@@ -51,9 +57,11 @@ def apply_area_budget(
     num_cores: int,
 ) -> dict[str, str]:
     """
-    Constant-area tradeoffs: fractions of nominal SBUF/HBM die area moved to
-    StRAM/LtRAM. B capacity uses B's tech density; A keeps ``(1 - fraction)`` of
-    nominal byte capacity.
+    Iso-area (constant die area) tradeoffs for differentiated hierarchies.
+
+    Fractions of nominal SBUF/HBM **die area** move to StRAM/LtRAM; recipient
+    ``capacity_bytes = area × density / 8``. Donor pools keep ``(1 - fraction)``
+    of nominal byte capacity. See ``docs/AREA_BUDGET.md``.
     """
     notes: dict[str, str] = {}
     if not budget.enabled:

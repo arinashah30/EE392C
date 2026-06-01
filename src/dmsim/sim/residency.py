@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 class TensorResidency:
     home_level: str
     resident_level: str | None = None
-    initialized_at_home: bool = False
 
 
 @dataclass

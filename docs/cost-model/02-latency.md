@@ -11,8 +11,8 @@ Latency accounting converts each charged access (interconnect hop or local touch
 ```mermaid
 flowchart TD
     ACC[AccessEvent] --> IC{Interconnect?}
-    IC -->|yes| TL[transfer_latency_ns per hop]
-    IC -->|no| AL[access_latency_ns local]
+    IC -->|yes| TL[latency_ns hop to_level set]
+    IC -->|no| AL[latency_ns local]
     TL --> CORE[time_by_core_ns core_id += lat]
     AL --> CORE
     CORE --> MAX[total_time_ns = max time_by_core_ns]
@@ -47,22 +47,16 @@ result.total_time_ns = max(result.time_by_core_ns.values()) if result.time_by_co
 
 ---
 
-## Two latency formulas
+## Latency: `latency_ns`
 
-All latency math lives in [`src/dmsim/sim/transfer.py`](../../src/dmsim/sim/transfer.py).
+All latency math lives in [`latency_ns`](../../src/dmsim/sim/transfer.py). Pass **`to_level`** for an interconnect hop; omit it for a local access at **`from_level`**.
 
-### 1. Interconnect transfer — `transfer_latency_ns`
+### 1. Interconnect transfer (`to_level` set)
 
 Used when `source != target` in [`_charge_path`](../../src/dmsim/sim/engine.py).
 
 ```python
-def transfer_latency_ns(hierarchy, from_level, to_level, nbytes):
-    bw_GBs = hierarchy.link_bandwidth_GBs(from_level.id, to_level.id)
-    bw_bytes_per_ns = bw_GBs  # GB/s numerically equals bytes/ns here
-    hop_transfer = nbytes / bw_bytes_per_ns
-    read_lat = from_level.tech.access.read_latency_ns
-    write_lat = to_level.tech.access.write_latency_ns
-    return read_lat + hop_transfer + write_lat
+latency_ns(hierarchy, nbytes, from_level=source, to_level=dest)
 ```
 
 **Formula:**
@@ -80,26 +74,26 @@ T_{\text{transfer}} = T_{\text{read}}(\text{from}) + \frac{\text{nbytes}}{BW_{\t
 
 Set in hierarchy YAML under `interconnect:` — see [`trainium2_baseline.yaml`](../../configs/hierarchy/trainium2_baseline.yaml).
 
-**Note:** tech `interface.max_bandwidth_GBs` is **not** used for interconnect hops; those use `link_bandwidth_GBs` above.
+Hop bandwidth comes from hierarchy `interconnect` (`link_bandwidth_GBs`), not tech YAML.
 
-### 2. Local / datapath read — `datapath_read_latency_ns`
+### 2. Local / datapath read — `latency_ns` (no `to_level`)
 
 Used when [`_charge_local_access`](../../src/dmsim/sim/engine.py) runs for **reads**:
 
 - SBUF **scratch hit** (`source == target == sbuf`, home elsewhere)
 - **StRAM direct read** (`_is_direct_stram_read`) — compute reads StRAM, not DMA `stram→sbuf`
 
-**Not used for:** same-level **`write`** events — omitted (0 ns). Writes still use line-granularity in `access_latency_ns` if charged elsewhere.
+**Not used for:** same-level **`write`** events — omitted (0 ns).
 
 ```python
-def datapath_read_latency_ns(level, nbytes, hierarchy):
-    return level.tech.access.read_latency_ns + nbytes / hierarchy.on_chip_bandwidth_GBs
+latency_ns(hierarchy, nbytes, from_level=level)
+# read_latency + nbytes / on_chip_bandwidth_GBs
 ```
 
-| Traffic | Mechanism in model | Bandwidth source |
-|---------|-------------------|------------------|
-| HBM/LtRAM → SBUF | `transfer_latency_ns` | `interconnect.dma_bandwidth_GBs` (~368 GB/s per core) |
-| SBUF/StRAM → compute | `datapath_read_latency_ns` | `interconnect.on_chip_bandwidth_GBs` (hierarchy YAML) |
+| Traffic | Call | Bandwidth source |
+|---------|------|------------------|
+| HBM/LtRAM → SBUF | `latency_ns(..., to_level=dest)` | `link_bandwidth_GBs` (~368 GB/s DMA) |
+| SBUF/StRAM → compute | `latency_ns(..., from_level=level)` | `on_chip_bandwidth_GBs` (hierarchy YAML) |
 
 This matches Trainium2: **DMA engines** move data off-chip into SBUF; **engine datapaths** read SBUF/StRAM for execution.
 
@@ -168,13 +162,13 @@ _accumulate_level(result, target, lat, eng)
 ```
 AccessEvent
     │
-    ├─ StRAM direct read? → _charge_local_access(stram)   → access_latency_ns
+    ├─ StRAM direct read? → _charge_local_access(stram)   → latency_ns local
     │
-    ├─ source != target? → _charge_path(source → target)   → transfer_latency_ns
+    ├─ source != target? → _charge_path(source → target)   → latency_ns hop
     │
     ├─ source == target, op == write? → (skip)             → 0 ns
     │
-    └─ source == target, op == read? → _charge_local_access → access_latency_ns
+    └─ source == target, op == read? → _charge_local_access → latency_ns local
 ```
 
 **Source/target rules:** [01-hops.md](01-hops.md).
@@ -205,7 +199,7 @@ SimulationResult(
 )
 ```
 
-On non-aggregated traces, **local SBUF** (`latency_by_level_ns["sbuf"]`) often dominates because hundreds of thousands of scratch hits each pay `access_latency_ns`.
+On non-aggregated traces, **local SBUF** (`latency_by_level_ns["sbuf"]`) often dominates because hundreds of thousands of scratch hits each pay local `latency_ns`.
 
 ---
 
@@ -214,8 +208,7 @@ On non-aggregated traces, **local SBUF** (`latency_by_level_ns["sbuf"]`) often d
 | Input | File | Affects |
 |-------|------|---------|
 | `read_latency_ns`, `write_latency_ns` | `configs/tech_specs/*.yaml` | Fixed component of both formulas |
-| `line_size_bytes` | same | Local access line count |
-| `dma_bandwidth_GBs`, `on_chip_bandwidth_GBs` | hierarchy YAML | Transfer `nbytes/BW` only |
+| `dma_bandwidth_GBs`, `on_chip_bandwidth_GBs` | hierarchy YAML | Hop and local-read `nbytes/BW` |
 | `level_domain` | hierarchy YAML | Which BW rule applies |
 | Trace `bytes` | trace JSON | Transfer size; datapath reads use `nbytes / on_chip_bandwidth_GBs` |
 | Residency / kernel wipes | simulator state | How often interconnect vs local |
@@ -226,8 +219,7 @@ On non-aggregated traces, **local SBUF** (`latency_by_level_ns["sbuf"]`) often d
 
 | Symbol | File |
 |--------|------|
-| `transfer_latency_ns` | [`transfer.py`](../../src/dmsim/sim/transfer.py) |
-| `access_latency_ns` | [`transfer.py`](../../src/dmsim/sim/transfer.py) |
+| `latency_ns` | [`transfer.py`](../../src/dmsim/sim/transfer.py) |
 | `link_bandwidth_GBs` | [`config/models.py`](../../src/dmsim/config/models.py) |
 | `_charge_path` | [`engine.py`](../../src/dmsim/sim/engine.py) |
 | `_handle_access` | [`engine.py`](../../src/dmsim/sim/engine.py) |

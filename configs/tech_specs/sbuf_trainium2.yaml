@@ -10,7 +10,3 @@ access:
   write_latency_ns: 1
   read_energy_pJ_per_bit: 0.05
   write_energy_pJ_per_bit: 0.05
-
-interface:
-  line_size_bytes: 128
-  max_bandwidth_GBs: 2048

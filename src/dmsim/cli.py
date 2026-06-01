@@ -34,7 +34,7 @@ def _load_hierarchy_for_trace(root: Path, hierarchy_path: Path, trace: Trace):
 def _print_area_budget(hierarchy) -> None:
     if not hierarchy.area_budget_notes:
         return
-    print("=== area budget (constant die area) ===")
+    print("=== iso-area budget (constant die area) ===")
     for key, value in sorted(hierarchy.area_budget_notes.items()):
         print(f"  {key}: {value}")
     for level in hierarchy.enabled_levels:

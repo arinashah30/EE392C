@@ -14,7 +14,7 @@ flowchart TD
     STRAM -->|yes| LOCAL1[_charge_local_access at stram]
     STRAM -->|no| SRC[Resolve source vs target]
     SRC --> CMP{source != target?}
-    CMP -->|yes| PATH[path_between → one hop]
+    CMP -->|yes| PATH[hops_between → one hop]
     CMP -->|no| WRITE{op == write?}
     PATH --> CHARGE[_charge_path]
     WRITE -->|yes| SKIP[No hop — same-level write omitted]
@@ -23,7 +23,7 @@ flowchart TD
 
 1. **`_handle_access`** decides **source** and **target** from trace + residency ([`engine.py`](../../src/dmsim/sim/engine.py)).
 2. Special cases run **before** the generic `source != target` check: **StRAM direct read** (local at home) and **same-level writes** (no charge).
-3. Otherwise, if source and target differ, **`path_between`** returns one hop ([`transfer.py`](../../src/dmsim/sim/transfer.py)) and **`_charge_path`** charges it.
+3. Otherwise, if source and target differ, **`hops_between`** returns one hop ([`transfer.py`](../../src/dmsim/sim/transfer.py)) and **`_charge_path`** charges it.
 
 ---
 
@@ -35,7 +35,7 @@ flowchart TD
 | `resident` | Current simulated location | `TensorResidency.resident_level` (fallback: `home_level`) |
 | `source` | Level read from this cycle | `_source_level_for_access` |
 | `home` | Persistent placement | `TensorResidency.home_level` from policy |
-| `hop` | Tuple `(from_level, to_level)` | `path_between(source, target)` |
+| `hop` | Tuple `(from_level, to_level)` | `hops_between(source, target)` |
 
 ---
 
@@ -107,7 +107,7 @@ When a tensor is **homed and resident in StRAM** and the trace requests a **read
 - `home_level == "stram"`
 - `resident == home`
 
-Then [`_charge_local_access`](../../src/dmsim/sim/engine.py) charges **`access_latency_ns(stram)`** / **`access_energy_pJ(stram)`** and returns — **no** `stram→sbuf` in `transfers_by_hop`.
+Then [`_charge_local_access`](../../src/dmsim/sim/engine.py) charges **local `latency_ns` at stram** / **`access_energy_pJ(stram)`** and returns — **no** `stram→sbuf` in `transfers_by_hop`.
 
 **Test:** [`tests/test_sim.py`](../../tests/test_sim.py) `test_stram_read_to_sbuf_is_local_not_dma`.
 
@@ -126,9 +126,9 @@ if event.op == "write":
 
 ---
 
-## Step 4 — `path_between` (direct edge)
+## Step 4 — `hops_between` (direct edge)
 
-[`path_between`](../../src/dmsim/sim/transfer.py) and [`hops_between`](../../src/dmsim/sim/transfer.py) always return **zero or one** hop:
+[`hops_between`](../../src/dmsim/sim/transfer.py) always returns **zero or one** hop:
 
 ```python
 def hops_between(hierarchy, source_id, dest_id):
@@ -149,15 +149,13 @@ def hops_between(hierarchy, source_id, dest_id):
 
 **Multi-hop staging** (e.g. `hbm → ltram` then `ltram → sbuf`) must appear as **two separate trace access events**. The simulator will not insert intermediate tiers automatically.
 
-The `home_id` parameter on `path_between` is **ignored** (kept for API compatibility).
-
 **Tests:** [`tests/test_transfer.py`](../../tests/test_transfer.py) · [`tests/test_sim.py`](../../tests/test_sim.py) `test_ltram_homed_access_charges_direct_hop`.
 
 ---
 
 ## Step 5 — `_charge_path` records the hop
 
-[`_charge_path`](../../src/dmsim/sim/engine.py) iterates `path_between` (typically one iteration) and increments:
+[`_charge_path`](../../src/dmsim/sim/engine.py) iterates `hops_between` (typically one iteration) and increments:
 
 ```python
 hop_key = f"{hop_from}->{hop_to}"
@@ -222,7 +220,7 @@ Merged multi-core traces (`merge_traces`) set **`core_id`** on each core’s `ke
 1. `target = "sbuf"`
 2. `source = resident = "hbm"`
 3. `source != target` → interconnect
-4. `path_between("hbm", "sbuf")` → `[("hbm", "sbuf")]`
+4. `hops_between("hbm", "sbuf")` → `[("hbm", "sbuf")]`
 5. `transfers_by_hop["hbm->sbuf"] += 1`
 6. `resident_level` updated to `"sbuf"`
 
@@ -241,7 +239,7 @@ Merged multi-core traces (`merge_traces`) set **`core_id`** on each core’s `ke
 | `_is_direct_stram_read` | [`engine.py`](../../src/dmsim/sim/engine.py) | StRAM home → local read, no hop |
 | `_charge_local_access` | [`engine.py`](../../src/dmsim/sim/engine.py) | Line-granularity local latency/energy |
 | `_source_level_for_access` | [`engine.py`](../../src/dmsim/sim/engine.py) | Writeback = SBUF source |
-| `path_between` / `hops_between` | [`transfer.py`](../../src/dmsim/sim/transfer.py) | Direct hop list |
+| `hops_between` | [`transfer.py`](../../src/dmsim/sim/transfer.py) | Direct hop list |
 | `_charge_path` | [`engine.py`](../../src/dmsim/sim/engine.py) | Charge + count hop |
 | `_handle_kernel_boundary` | [`engine.py`](../../src/dmsim/sim/engine.py) | Per-core fast-buffer + residency wipe |
 | `_kernel_wipe_cores` | [`engine.py`](../../src/dmsim/sim/engine.py) | NeuronCore ids affected by `kernel_end` |

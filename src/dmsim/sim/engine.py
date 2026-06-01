@@ -9,10 +9,9 @@ from dmsim.policies.placement import assign_home_levels
 from dmsim.sim.residency import FastBufferState, LevelPoolState, TensorResidency
 from dmsim.sim.transfer import (
     access_energy_pJ,
-    access_latency_ns,
-    path_between,
+    hops_between,
+    latency_ns,
     transfer_energy_pJ,
-    transfer_latency_ns,
 )
 from dmsim.trace.schema import (
     AccessEvent,
@@ -243,7 +242,6 @@ def _bootstrap_near_memory_homes(
                 pool.install(tensor_id, tensor.bytes)
         state = residency[tensor_id]
         state.resident_level = home_level
-        state.initialized_at_home = True
 
 
 def _fast_buffer(
@@ -291,7 +289,7 @@ def _is_direct_stram_read(
     """
     Trace loads into SBUF but tensor is homed in StRAM and resident at home.
 
-    Charge datapath read latency at StRAM (``datapath_read_latency_ns``), same
+    Charge datapath read latency at StRAM (``latency_ns`` local read), same
     model as SBUF scratch hits — not a DMA ``stram→sbuf`` hop.
     """
     if event.op != "read":
@@ -385,9 +383,7 @@ def _handle_access(
             target,
             nbytes,
             result,
-            home_level=state.home_level,
             core_id=core_id,
-            count_hbm=True,
         )
         _install_in_fast_buffer(
             hierarchy, fast_buffers, core_id, target, event.tensor_id, nbytes, pools, residency
@@ -411,9 +407,9 @@ def _charge_local_access(
     core_id: int,
     result: SimulationResult,
 ) -> None:
-    """Line-granularity local read/write (SBUF scratch hits, direct StRAM reads)."""
+    """Local read latency/energy (SBUF scratch hits, direct StRAM reads)."""
     level = hierarchy.level_by_id(level_id)
-    lat = access_latency_ns(level, op, nbytes, hierarchy)
+    lat = latency_ns(hierarchy, nbytes, from_level=level)
     eng = access_energy_pJ(level, op, nbytes)
     _add_core_latency(result, core_id, lat)
     result.total_energy_pJ += eng
@@ -431,18 +427,14 @@ def _charge_path(
     nbytes: int,
     result: SimulationResult,
     *,
-    home_level: str,
     core_id: int,
-    count_hbm: bool,
 ) -> None:
     if source_id == dest_id:
         return
-    for hop_from, hop_to in path_between(
-        hierarchy, source_id, dest_id, home_id=home_level
-    ):
+    for hop_from, hop_to in hops_between(hierarchy, source_id, dest_id):
         from_level = hierarchy.level_by_id(hop_from)
         to_level = hierarchy.level_by_id(hop_to)
-        lat = transfer_latency_ns(hierarchy, from_level, to_level, nbytes)
+        lat = latency_ns(hierarchy, nbytes, from_level=from_level, to_level=to_level)
         eng = transfer_energy_pJ(hierarchy, from_level, to_level, nbytes)
         _add_core_latency(result, core_id, lat)
         result.total_energy_pJ += eng
@@ -450,9 +442,9 @@ def _charge_path(
         result.transfers_by_hop[hop_key] = result.transfers_by_hop.get(hop_key, 0) + 1
         _accumulate_level(result, hop_from, lat * 0.5, eng * 0.5)
         _accumulate_level(result, hop_to, lat * 0.5, eng * 0.5)
-        if count_hbm and hop_from == "hbm":
+        if hop_from == "hbm":
             result.hbm_read_bytes += nbytes
-        if count_hbm and hop_to == "hbm":
+        if hop_to == "hbm":
             result.hbm_write_bytes += nbytes
 
 

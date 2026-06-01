@@ -2,7 +2,7 @@ from pathlib import Path
 
 from dmsim.config.loader import load_hierarchy, load_policy
 from dmsim.sim.engine import run_simulation
-from dmsim.sim.transfer import transfer_latency_ns
+from dmsim.sim.transfer import latency_ns
 from dmsim.trace.schema import AccessEvent, TensorCategory, TensorRecord, Trace, TraceMetadata
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +16,7 @@ def test_per_core_time_sums_then_worst_core_wins() -> None:
     nbytes = 1_000_000
     hbm = hierarchy.level_by_id("hbm")
     sbuf = hierarchy.level_by_id("sbuf")
-    hop_lat = transfer_latency_ns(hierarchy, hbm, sbuf, nbytes)
+    hop_lat = latency_ns(hierarchy, nbytes, from_level=hbm, to_level=sbuf)
 
     trace = Trace(
         metadata=TraceMetadata(
@@ -53,7 +53,7 @@ def test_same_core_accumulates_multiple_transfers() -> None:
     nbytes = 500_000
     hbm = hierarchy.level_by_id("hbm")
     sbuf = hierarchy.level_by_id("sbuf")
-    hop_lat = transfer_latency_ns(hierarchy, hbm, sbuf, nbytes)
+    hop_lat = latency_ns(hierarchy, nbytes, from_level=hbm, to_level=sbuf)
 
     trace = Trace(
         metadata=TraceMetadata(workload="serial_core0"),

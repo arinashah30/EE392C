@@ -63,7 +63,7 @@ def test_disabled_level_uses_policy_fallback() -> None:
     assert homes["kv"] == "hbm"
 
 
-def test_tiered_stram_spills_to_ltram_best_case() -> None:
+def test_tiered_stram_spills_to_hbm_per_policy() -> None:
     hierarchy = load_hierarchy(
         ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
     )
@@ -96,4 +96,4 @@ def test_tiered_stram_spills_to_ltram_best_case() -> None:
         access_counts={"kv_hot": 50, "kv_cold": 1},
     )
     assert homes["kv_hot"] == "stram"
-    assert homes["kv_cold"] == "ltram"
+    assert homes["kv_cold"] == "hbm"

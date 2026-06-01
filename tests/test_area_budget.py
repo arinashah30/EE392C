@@ -44,17 +44,17 @@ def test_fraction_area_budget() -> None:
     assert hierarchy.area_budget_notes.get("stram_replaces_sbuf_fraction") == "0.5"
     assert hierarchy.area_budget_notes.get("ltram_replaces_hbm_fraction") == "0.25"
 
-    # 50% of SBUF die area → StRAM; SBUF keeps 50% of nominal capacity.
+    # Iso-area: 50% of SBUF die area → StRAM (capacity = area × ρ_StRAM / 8).
     assert sbuf.capacity_bytes == int(nominal_sbuf * 0.5)
-    sbuf_area = nominal_sbuf * 8 / sbuf_density
-    expected_stram = int(0.5 * sbuf_area * stram_density / 8)
+    sbuf_area_um2 = nominal_sbuf * 8 / sbuf_density
+    expected_stram = int(0.5 * sbuf_area_um2 * stram_density / 8)
     assert stram.capacity_bytes == expected_stram
-    assert stram.capacity_bytes > nominal_sbuf // 2  # eDRAM denser than SRAM
+    assert stram.capacity_bytes > nominal_sbuf // 2  # denser tech → more bytes same area
 
-    # 25% of HBM die area → LtRAM; HBM keeps 75% of nominal capacity.
+    # Iso-area: 25% of HBM die area → LtRAM.
     assert hbm.capacity_bytes == int(nominal_hbm * 0.75)
-    hbm_area = nominal_hbm * 8 / hbm_density
-    expected_ltram = int(0.25 * hbm_area * ltram_density / 8)
+    hbm_area_um2 = nominal_hbm * 8 / hbm_density
+    expected_ltram = int(0.25 * hbm_area_um2 * ltram_density / 8)
     assert ltram.capacity_bytes == expected_ltram
 
 

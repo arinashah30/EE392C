@@ -16,11 +16,6 @@ access:
   read_energy_pJ_per_bit: 0.5
   write_energy_pJ_per_bit: 1.0
 
-interface:
-  line_size_bytes: 64
-  # Literature: up to ~34 GB/s (Micron HZO NVDRAM LPDDR5-class projection)
-  max_bandwidth_GBs: 34
-
 notes:
   relative_cost: moderate
   description: PZT / HZO ferroelectric capacitor

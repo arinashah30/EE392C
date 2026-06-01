@@ -20,11 +20,6 @@ access:
   read_energy_pJ_per_bit: 1.0
   write_energy_pJ_per_bit: 1.5
 
-interface:
-  line_size_bytes: 64
-  # Literature array BW (not used for datapath read latency; see hierarchy on_chip_bandwidth_GBs).
-  max_bandwidth_GBs: 128
-
 notes:
   relative_cost: moderate-high
   description: trench/stacked capacitor; dedicated capacitor process

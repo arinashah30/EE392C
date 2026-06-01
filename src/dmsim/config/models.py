@@ -13,11 +13,6 @@ class AccessSpec(BaseModel):
     write_energy_pJ_per_bit: float
 
 
-class InterfaceSpec(BaseModel):
-    line_size_bytes: int = 64
-    max_bandwidth_GBs: float
-
-
 class TechnologySpec(BaseModel):
     name: str
     class_: str = Field(alias="class")
@@ -28,7 +23,6 @@ class TechnologySpec(BaseModel):
     refresh_energy_pJ_per_bit: float | None = None
     cell_density_bits_per_um2: float | None = None
     access: AccessSpec
-    interface: InterfaceSpec
 
     model_config = {"populate_by_name": True}
 
@@ -79,14 +73,17 @@ class KernelConfig(BaseModel):
 
 
 class AreaBudgetConfig(BaseModel):
-    """Trade StRAM area against SBUF and LtRAM area against HBM at constant die area."""
+    """
+    Iso-area budget: fixed SBUF/HBM die area; StRAM/LtRAM capacity from
+    ``capacity_bytes = area_um² × cell_density_bits_per_um2 / 8``.
+    """
 
     enabled: bool = True
     nominal_sbuf_bytes_per_core: int | None = None
     nominal_hbm_gib_per_chip: float | None = None
     sbuf_reference_density_bits_per_um2: float = 2.44
     hbm_reference_density_bits_per_um2: float = 1.1
-    # Fraction (0–1) of nominal SBUF/HBM die area traded to StRAM/LtRAM.
+    # Fraction (0–1) of nominal SBUF/HBM die area repurposed for StRAM/LtRAM.
     stram_replaces_sbuf_fraction: float = 0.0
     ltram_replaces_hbm_fraction: float = 0.0
 
@@ -164,9 +161,6 @@ class ResolvedHierarchy(BaseModel):
             if level.id == level_id:
                 return level
         raise KeyError(f"unknown level id: {level_id}")
-
-    def index_of(self, level_id: str) -> int:
-        return self.level_by_id(level_id).index
 
     @property
     def dma_bandwidth_GBs(self) -> float:

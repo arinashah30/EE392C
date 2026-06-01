@@ -229,9 +229,9 @@ def test_stram_read_to_sbuf_is_local_not_dma() -> None:
     assert result.energy_by_level_pJ.get("sbuf", 0.0) == 0.0
     assert result.energy_by_level_pJ.get("stram", 0.0) > 0.0
     stram = hierarchy.level_by_id("stram")
-    from dmsim.sim.transfer import access_latency_ns
+    from dmsim.sim.transfer import latency_ns
 
-    assert result.total_time_ns == access_latency_ns(stram, "read", 8192, hierarchy)
+    assert result.total_time_ns == latency_ns(hierarchy, 8192, from_level=stram)
 
 
 def test_hbm_homed_access_single_hop_on_baseline_stack() -> None:

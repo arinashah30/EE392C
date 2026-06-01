@@ -48,7 +48,7 @@ Illustrative ids and sizes below are simplified.
 | §5 Runtime state | [`residency.py`](residency.py) |
 | §6 Event loop | [`engine.py`](engine.py) `run_simulation` |
 | §6 Kernel wipe | [`engine.py`](engine.py) `_handle_kernel_boundary` · ingest `_kernel_events_from_layers` |
-| §7 Transfer cost | [`transfer.py`](transfer.py) `path_between` · [`engine.py`](engine.py) `_charge_path` · `_add_core_latency` |
+| §7 Transfer cost | [`transfer.py`](transfer.py) `hops_between` · [`engine.py`](engine.py) `_charge_path` · `_add_core_latency` |
 | §8 Access handler | [`engine.py`](engine.py) `_handle_access` · `_source_level_for_access` |
 | §9 Output | [`engine.py`](engine.py) `SimulationResult` |
 
@@ -154,8 +154,7 @@ A **hop** is one **adjacent** memory-to-memory link (e.g. `stram → sbuf`). The
 
 | Function | Use |
 |----------|-----|
-| [`path_between`](transfer.py) | **Access costing** in `_charge_path` — one direct edge |
-| [`hops_between`](transfer.py) | Same as `path_between` — direct `source → dest` (no stack walk) |
+| [`hops_between`](transfer.py) | **Access costing** in `_charge_path` — one direct `source → dest` edge |
 
 Every interconnect move is **one direct hop** between source and destination levels (e.g. `hbm → sbuf`, `sbuf → hbm`, `ltram → sbuf`). The `levels:` list order in hierarchy YAML does **not** insert intermediate tiers. Multi-hop staging must appear as **separate trace access events**.
 
@@ -366,13 +365,12 @@ This seeds **`TensorResidency`**, then [`_bootstrap_near_memory_homes`](engine.p
 residency["linear_weight_12"] = TensorResidency(
     home_level="ltram",
     resident_level="ltram",
-    initialized_at_home=True,
 )
 ```
 
 **Decode assumption:** persistent tensors are already in their home before the profiled window (compile / model load). Trace replay only charges **home → SBUF** reloads. HBM-homed tensors are pre-installed via [`_seed_home_allocations`](engine.py). SBUF/PSUM are never pre-seeded.
 
-See [`docs/PLACEMENT_AND_EVICTION.md`](../../../docs/PLACEMENT_AND_EVICTION.md) for area budget and spill details.
+See [`docs/AREA_BUDGET.md`](../../../docs/AREA_BUDGET.md) (iso-area capacities) and [`docs/PLACEMENT_AND_EVICTION.md`](../../../docs/PLACEMENT_AND_EVICTION.md) (spill).
 
 ---
 
@@ -391,7 +389,6 @@ Defined [`residency.py`](residency.py) L7–11:
 class TensorResidency:
     home_level: str
     resident_level: str | None = None
-    initialized_at_home: bool = False          # True after t=0 bootstrap
 ```
 
 After a load access charges `ltram→sbuf`:
@@ -555,7 +552,7 @@ Even if `resident` was already `hbm` before the write, [`_source_level_for_acces
 
 ### How hops are obtained
 
-On an interconnect move (`source_level != target`), `_charge_path` calls [`path_between`](transfer.py), which returns **one direct hop** `(source, dest)` regardless of other tiers enabled in the hierarchy. Writebacks (`sbuf → hbm`), loads (`ltram → sbuf`, `hbm → sbuf`), and reloads all use the same rule.
+On an interconnect move (`source_level != target`), `_charge_path` calls [`hops_between`](transfer.py), which returns **one direct hop** `(source, dest)` regardless of other tiers enabled in the hierarchy. Writebacks (`sbuf → hbm`), loads (`ltram → sbuf`, `hbm → sbuf`), and reloads all use the same rule.
 
 ### Chip time (per core)
 
@@ -571,7 +568,7 @@ Trace `t_ns` is used for **event order** and **refresh-energy** accounting betwe
 
 ### Bandwidth (DMA vs on-chip)
 
-Interconnect hops use `link_bandwidth_GBs` (DMA vs on-chip). **Datapath reads** (SBUF scratch, StRAM direct read) use `on_chip_bandwidth_GBs` via `datapath_read_latency_ns` — not DMA and not tech `max_bandwidth_GBs`.
+Interconnect hops use `link_bandwidth_GBs` (DMA vs on-chip). **Local reads** (SBUF scratch, StRAM direct read) use `latency_ns` without `to_level` and `on_chip_bandwidth_GBs` from hierarchy YAML.
 
 `dma_bandwidth_GBs` and `on_chip_bandwidth_GBs` in hierarchy YAML are **per NeuronCore** (each hop’s `nbytes/BW` uses that core’s rate).
 
@@ -597,9 +594,8 @@ link_bandwidth_GBs("ltram", "stram") # → 368
 
 | Function | When used |
 |----------|-----------|
-| `transfer_latency_ns` / `transfer_energy_pJ` | **One** adjacent hop in `_charge_path` |
-| `_charge_local_access` → `datapath_read_latency_ns` / `access_energy_pJ` | SBUF scratch hits, **StRAM direct read** |
-| `_charge_local_access` → `access_latency_ns` (writes) | Line-granularity local writes if charged |
+| `latency_ns` (`to_level` set) / `transfer_energy_pJ` | **One** interconnect hop in `_charge_path` |
+| `_charge_local_access` → `latency_ns` (local) / `access_energy_pJ` | SBUF scratch, **StRAM direct read** |
 
 Interconnect hop:
 
@@ -615,7 +611,7 @@ read_latency(level) + nbytes / on_chip_bandwidth_GBs
 
 ### `_charge_path` accounting
 
-For **each** hop in `path_between(source, dest)` (always zero or one direct edge):
+For **each** hop in `hops_between(source, dest)` (always zero or one direct edge):
 
 1. Add that hop’s latency to **`time_by_core_ns[core_id]`** and energy to **`total_energy_pJ`**
 2. Increment `transfers_by_hop["stram->sbuf"]` (etc.)
@@ -769,7 +765,7 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 
 | Symbol | Lines | Role |
 |--------|-------|------|
-| `TensorResidency` | L7–11 | `home_level`, `resident_level`, `initialized_at_home` |
+| `TensorResidency` | L7–10 | `home_level`, `resident_level` |
 | `FastBufferState` | L15–23 | Per-core SBUF/PSUM occupancy; `clear()` |
 | `LevelPoolState` | L27–44 | Chip-wide pool; `can_fit`, `install`, `remove` |
 
@@ -777,16 +773,9 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 
 | Symbol | Lines | Role |
 |--------|-------|------|
-| `level_order` | — | Enabled level ids in hierarchy order |
-| `hops_between` | — | Direct hop `source → dest` |
-| `path_between` | — | Same as `hops_between` (used by `_charge_path`) |
-| `physical_hops_between` | — | Alias of `hops_between` |
-| `transfer_latency_ns` | — | Single direct link latency |
+| `hops_between` | — | Direct hop `source → dest` (used by `_charge_path`) |
+| `latency_ns` | — | Hop (`to_level` set) or local access (`to_level` None) |
 | `transfer_energy_pJ` | — | Single direct link energy |
-| `transfer_latency_between_levels` | — | Direct transfer latency |
-| `transfer_energy_between_levels` | — | Direct transfer energy |
-| `datapath_read_latency_ns` | — | SBUF/StRAM read to compute (`on_chip_bandwidth_GBs`) |
-| `access_latency_ns` | — | Local access (datapath read or line-granularity write) |
 | `access_energy_pJ` | — | Local access energy |
 
 ### [`sim/engine.py`](engine.py)
@@ -808,7 +797,7 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 | `_is_direct_stram_read` | — | StRAM home+resident → local read, no hop |
 | `_charge_local_access` | — | Line-granularity local latency/energy |
 | `_source_level_for_access` | — | Writeback = SBUF source |
-| `_charge_path` | — | `path_between` + per-core latency + HBM bytes |
+| `_charge_path` | — | `hops_between` + per-core latency + HBM bytes |
 | `_install_in_fast_buffer` | — | SBUF occupancy; evict without writeback |
 | `_evict_from_fast_buffer` | — | Drop one SBUF occupant; resident ← home |
 | `_deepest_enabled` | — | Deepest enabled tier (bootstrap / spill) |
@@ -857,4 +846,4 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 | `ResolvedHierarchy` | models | L111 | Levels, links, kernel config |
 | `link_bandwidth_GBs` | models | L145 | Effective hop bandwidth |
 
-See [`docs/PLACEMENT_AND_EVICTION.md`](../../../docs/PLACEMENT_AND_EVICTION.md) for policy tables and area budget.
+See [`docs/AREA_BUDGET.md`](../../../docs/AREA_BUDGET.md) and [`docs/PLACEMENT_AND_EVICTION.md`](../../../docs/PLACEMENT_AND_EVICTION.md).

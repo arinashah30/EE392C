@@ -14,6 +14,7 @@ How **dmsim** turns an ingested trace into **time**, **energy**, and **HBM traff
 **Related:**
 
 - Full simulator guide: [`src/dmsim/sim/README.md`](../../src/dmsim/sim/README.md)
+- Iso-area capacities: [`docs/AREA_BUDGET.md`](../AREA_BUDGET.md)
 - Placement / spill: [`docs/PLACEMENT_AND_EVICTION.md`](../PLACEMENT_AND_EVICTION.md)
 
 ---
@@ -28,7 +29,7 @@ How **dmsim** turns an ingested trace into **time**, **energy**, and **HBM traff
 | **Target** | Level named in the trace access (`AccessEvent.target_level`, default `sbuf`). |
 | **Source** | Level data is read *from* for this access (derived in `_source_level_for_access`). |
 | **Interconnect move** | `source != target` → charge via `_charge_path` (transfer latency/energy). Exception: **StRAM direct read** — local at home even when target is SBUF. |
-| **Local access** | [`_charge_local_access`](../../src/dmsim/sim/engine.py): scratch/read hits via `access_latency_ns` / `access_energy_pJ`. Includes **StRAM direct read**. |
+| **Local access** | [`_charge_local_access`](../../src/dmsim/sim/engine.py): scratch/read hits via `latency_ns` (local) / `access_energy_pJ`. Includes **StRAM direct read**. |
 | **Scratch hit** | `resident == target != home` (e.g. SBUF cache hit); local access only. |
 | **StRAM direct read** | `home == stram`, `resident == home`, read to SBUF → local at StRAM, **no** `stram→sbuf` hop. |
 | **Same-level write** | `source == target`, `op == write` → **no** latency or energy (in-place SBUF touch). |
@@ -111,7 +112,6 @@ Defined in [`src/dmsim/sim/residency.py`](../../src/dmsim/sim/residency.py):
 class TensorResidency:
     home_level: str
     resident_level: str | None = None
-    initialized_at_home: bool = False
 ```
 
 After placement for a weight homed in HBM on baseline policy:

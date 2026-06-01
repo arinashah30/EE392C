@@ -17,11 +17,6 @@ access:
   # Write: 20–175 pJ/cell (SET ~20 pJ; worst-case MLC SET+RST 175 pJ), per cell ≈ per bit
   write_energy_pJ_per_bit: 20.0
 
-interface:
-  line_size_bytes: 64
-  # Literature read BW: ~2.3 GB/s (Micron 27 nm 16 Gb 1T1R macro); writes ~0.2–0.5 GB/s (array SET limited)
-  max_bandwidth_GBs: 2.3
-
 notes:
   relative_cost: low
   description: 1T1R / 1R; CMOS back-end compatible

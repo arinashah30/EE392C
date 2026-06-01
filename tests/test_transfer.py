@@ -1,12 +1,7 @@
 from pathlib import Path
 
 from dmsim.config.loader import load_hierarchy
-from dmsim.sim.transfer import (
-    datapath_read_latency_ns,
-    hops_between,
-    path_between,
-    transfer_latency_ns,
-)
+from dmsim.sim.transfer import hops_between, latency_ns
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,16 +19,12 @@ def test_ltram_to_sbuf_is_direct_hop() -> None:
         ROOT / "configs/hierarchy/trainium2_diff_mem.yaml", num_cores=1
     )
     assert hops_between(hierarchy, "ltram", "sbuf") == [("ltram", "sbuf")]
-    assert path_between(hierarchy, "ltram", "sbuf", home_id="ltram") == [
-        ("ltram", "sbuf")
-    ]
 
 
 def test_hbm_to_sbuf_is_direct_hop_with_ltram_in_stack() -> None:
     hierarchy = load_hierarchy(
         ROOT / "configs/hierarchy/trainium2_diff_mem_25hbm.yaml", num_cores=1
     )
-    assert path_between(hierarchy, "hbm", "sbuf", home_id="hbm") == [("hbm", "sbuf")]
     assert hops_between(hierarchy, "hbm", "sbuf") == [("hbm", "sbuf")]
     assert hops_between(hierarchy, "sbuf", "hbm") == [("sbuf", "hbm")]
 
@@ -75,7 +66,7 @@ def test_transfer_latency_uses_access_latencies_plus_bytes_over_bw() -> None:
     sbuf = hierarchy.level_by_id("sbuf")
     hbm = hierarchy.level_by_id("hbm")
     nbytes = 1_000_000
-    lat = transfer_latency_ns(hierarchy, hbm, sbuf, nbytes)
+    lat = latency_ns(hierarchy, nbytes, from_level=hbm, to_level=sbuf)
     bw_bytes_per_ns = 368.0
     expected = (
         hbm.tech.access.read_latency_ns
@@ -85,14 +76,14 @@ def test_transfer_latency_uses_access_latencies_plus_bytes_over_bw() -> None:
     assert lat == expected
 
 
-def test_datapath_read_uses_tech_max_bandwidth_not_dma() -> None:
+def test_local_read_uses_on_chip_bandwidth_not_dma() -> None:
     hierarchy = load_hierarchy(
         ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
     )
     sbuf = hierarchy.level_by_id("sbuf")
     nbytes = 8192
-    lat = datapath_read_latency_ns(sbuf, nbytes, hierarchy)
+    lat = latency_ns(hierarchy, nbytes, from_level=sbuf)
     assert lat == sbuf.tech.access.read_latency_ns + nbytes / hierarchy.on_chip_bandwidth_GBs
-    assert lat < transfer_latency_ns(
-        hierarchy, hierarchy.level_by_id("hbm"), sbuf, nbytes
+    assert lat < latency_ns(
+        hierarchy, nbytes, from_level=hierarchy.level_by_id("hbm"), to_level=sbuf
     )

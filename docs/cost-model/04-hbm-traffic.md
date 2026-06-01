@@ -11,9 +11,9 @@
 HBM bytes increment inside [`_charge_path`](../../src/dmsim/sim/engine.py) **only when a hop touches HBM**:
 
 ```python
-if count_hbm and hop_from == "hbm":
+if hop_from == "hbm":
     result.hbm_read_bytes += nbytes
-if count_hbm and hop_to == "hbm":
+if hop_to == "hbm":
     result.hbm_write_bytes += nbytes
 ```
 
@@ -109,12 +109,6 @@ _charge_path(..., nbytes=4096, ...)
 Many small writebacks (few MB total, ~100k+ events) can dominate **hop count** and **fixed latency** while **`hbm_write_bytes`** stays small.
 
 ---
-
-## `count_hbm` flag
-
-`_charge_path` accepts `count_hbm: bool`. All normal access paths pass **`count_hbm=True`**.
-
-If `count_hbm=False`, hops would still charge latency/energy but not increment HBM byte counters. (No production call sites use `False` today.)
 
 StRAM retention expiry is **not** modeled; refresh is assumed sufficient to keep homed data valid.
 
@@ -224,7 +218,7 @@ transfers_by_hop={
 | `_charge_path` (HBM counters) | [`engine.py`](../../src/dmsim/sim/engine.py) |
 | `_source_level_for_access` (writeback routing) | [`engine.py`](../../src/dmsim/sim/engine.py) |
 | `_handle_access` | [`engine.py`](../../src/dmsim/sim/engine.py) |
-| `path_between` | [`transfer.py`](../../src/dmsim/sim/transfer.py) |
+| `hops_between` | [`transfer.py`](../../src/dmsim/sim/transfer.py) |
 | `SimulationResult.hbm_traffic_bytes` | [`engine.py`](../../src/dmsim/sim/engine.py) |
 
 **Back to:** [Index →](README.md)

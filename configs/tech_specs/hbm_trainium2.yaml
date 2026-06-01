@@ -15,7 +15,3 @@ access:
   write_latency_ns: 120
   read_energy_pJ_per_bit: 7.0
   write_energy_pJ_per_bit: 8.0
-
-interface:
-  line_size_bytes: 64
-  max_bandwidth_GBs: 2900

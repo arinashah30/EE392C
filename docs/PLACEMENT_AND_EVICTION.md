@@ -54,7 +54,7 @@ Use with a “differentiated” hierarchy (`trainium2_diff_mem_50sbuf_25hbm.yaml
 
 This runs **once** when the simulation starts. It does **not** move tensors around during the run.
 
-**Area budget** (on the 50%/25% hierarchy): StRAM steals half of SBUF’s area per core; LtRAM steals a quarter of HBM per chip. The policy table stays the same; **capacities** change.
+**Iso-area budget** (50%/25% hierarchy): half of each core’s nominal SBUF **die area** becomes StRAM (`capacity_StRAM = area × ρ_StRAM / 8`); a quarter of chip HBM **die area** becomes LtRAM. Policy tables are unchanged; **simulator pool capacities** come from the area trade. Details: [`AREA_BUDGET.md`](AREA_BUDGET.md).
 
 ---
 
@@ -72,7 +72,7 @@ For each access event (in time order):
 
 ### How transfer hops are computed
 
-Code: `_charge_path` in `src/dmsim/sim/engine.py` calls **`path_between`**, which returns **one direct edge** `(source, dest)` — it does **not** walk intermediate YAML levels. The optional `home_id` argument is **ignored**.
+Code: `_charge_path` in `src/dmsim/sim/engine.py` calls **`hops_between`**, which returns **one direct edge** `(source, dest)` — it does **not** walk intermediate YAML levels.
 
 Example: weight **home = LtRAM**, load to SBUF → **`ltram → sbuf` only** (not `ltram → stram → sbuf`, not via HBM).
 
@@ -82,11 +82,9 @@ Example: weight **home = LtRAM**, load to SBUF → **`ltram → sbuf` only** (no
 | LtRAM | `ltram → sbuf` |
 | StRAM | **Local read at StRAM** when homed+resident there — **not** `stram → sbuf` |
 
-`physical_hops_between` in `transfer.py` is a **backward-compatible alias** of `hops_between` (same direct-edge behavior).
-
 ### Transfer time and bandwidth
 
-Per hop: `read_latency + nbytes / bandwidth + write_latency` (`transfer_latency_ns`).
+Per hop: `read_latency + nbytes / bandwidth + write_latency` (`latency_ns` with `to_level` set).
 
 Hierarchy YAML sets interconnect bandwidth: **DMA hops** use `dma_bandwidth_GBs`; **datapath reads** (SBUF scratch, StRAM direct read) use `on_chip_bandwidth_GBs`. Hierarchy sets:
 
