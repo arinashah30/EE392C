@@ -6,16 +6,16 @@ volatile: false
 retention_s: null
 
 # High density (<10 nm scalable); MLC capable — order-of-magnitude estimate for floorplan
-cell_density_bits_per_um2: 200.0
+cell_density_bits_per_um2: 62.5
 
 access:
   # Read: <5–20 ns (Intel <5 ns sense; Crossbar 20 ns cycle)
   read_latency_ns: 10.0
   # Write: device sub-ns; array SET ~100 ns (verify-write loops up to µs)
-  write_latency_ns: 100.0
+  write_latency_ns: 10.0
   read_energy_pJ_per_bit: 0.5
   # Write: 20–175 pJ/cell (SET ~20 pJ; worst-case MLC SET+RST 175 pJ), per cell ≈ per bit
-  write_energy_pJ_per_bit: 20.0
+  write_energy_pJ_per_bit: 1
 
 notes:
   relative_cost: low

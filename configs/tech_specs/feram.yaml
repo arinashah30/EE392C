@@ -6,15 +6,15 @@ volatile: false
 retention_s: null
 
 # Micron HZO NVDRAM 0.45 Gb/mm² → 450 bits/µm²
-cell_density_bits_per_um2: 450.0
+cell_density_bits_per_um2: 30.0
 
 access:
   # Read: 5–20 ns (HZO prototypes 5–7 ns) | Write: 2–20 ns (Intel HZO 2 ns pulse)
-  read_latency_ns: 12.5
-  write_latency_ns: 11.0
+  read_latency_ns: 10.0
+  write_latency_ns: 10.0
   # Read: ~100 fJ–1 pJ/bit | Write: ~100 fJ–10 pJ/bit
   read_energy_pJ_per_bit: 0.5
-  write_energy_pJ_per_bit: 1.0
+  write_energy_pJ_per_bit: 0.1
 
 notes:
   relative_cost: moderate
