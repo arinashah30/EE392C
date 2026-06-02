@@ -3,11 +3,9 @@
 Placement runs once at simulation start. It does not move tensors during the
 trace — only adjusts homes when a tier is disabled or over capacity.
 
-Policy YAML (`configs/policies/`) supplies category → desired level,
-per-level spill/fallback targets (`fallback_by_level`; default hbm), and
-spill victim ordering (`spill_victim_order`: best_case vs worst_case by trace
-access count).
-Hierarchy YAML supplies which levels exist and their capacities.
+Policy YAML supplies category → desired level, spill/fallback targets, and
+``spill_victim_order`` (best_case vs worst_case). Spill ranking requires a
+trace: residency-aware retention from ``build_retention_by_residency_replay``.
 """
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from dmsim.config.models import PolicyConfig, ResolvedHierarchy
-from dmsim.trace.schema import TensorRecord
+from dmsim.trace.schema import TensorRecord, Trace
 
 
 def assign_home_levels(
@@ -23,12 +21,11 @@ def assign_home_levels(
     hierarchy: ResolvedHierarchy,
     policy: PolicyConfig,
     *,
-    access_counts: dict[str, int] | None = None,
+    trace: Trace | None = None,
 ) -> dict[str, str]:
     """Assign each tensor a persistent home memory level for the simulation."""
     enabled_ids = {level.id for level in hierarchy.enabled_levels}
     homes: dict[str, str] = {}
-    counts = access_counts or {}
 
     for tensor in tensors:
         category_key = tensor.category.value
@@ -39,7 +36,7 @@ def assign_home_levels(
 
         homes[tensor.id] = desired
 
-    _enforce_capacities(tensors, homes, hierarchy, policy, counts)
+    _enforce_capacities(tensors, homes, hierarchy, policy, trace=trace)
     return homes
 
 
@@ -76,22 +73,47 @@ def _resolve_spill_target(
 
 def _spill_victim_key(
     tensor: TensorRecord,
-    access_counts: dict[str, int],
+    retention: dict[str, float],
+    home_hop_bytes: dict[str, int],
     policy: PolicyConfig,
 ) -> tuple:
     """Sort key for picking spill victims (lower = evicted first in best_case)."""
-    access = access_counts.get(tensor.id, 0)
+    value = retention.get(tensor.id, 0)
+    weight = home_hop_bytes.get(tensor.id, 0)
     if policy.spill_victim_order == "worst_case":
-        return (-access, -tensor.bytes, tensor.id)
-    return (access, tensor.bytes, tensor.id)
+        return (-value, -weight, tensor.id)
+    return (value, weight, tensor.id)
 
 
 def _pick_spill_victim(
     pool: list[TensorRecord],
-    access_counts: dict[str, int],
+    retention: dict[str, float],
+    home_hop_bytes: dict[str, int],
     policy: PolicyConfig,
 ) -> TensorRecord:
-    return min(pool, key=lambda tensor: _spill_victim_key(tensor, access_counts, policy))
+    return min(
+        pool,
+        key=lambda tensor: _spill_victim_key(
+            tensor, retention, home_hop_bytes, policy
+        ),
+    )
+
+
+def _spill_retention_index(
+    trace: Trace | None,
+    hierarchy: ResolvedHierarchy,
+    policy: PolicyConfig,
+    homes: dict[str, str],
+    pool_level: str,
+    spill_target: str,
+) -> tuple[dict[str, float], dict[str, int]]:
+    if trace is None:
+        return {}, {}
+    from dmsim.sim.placement_replay import build_retention_by_residency_replay
+
+    return build_retention_by_residency_replay(
+        trace, hierarchy, policy, homes, pool_level, spill_target
+    )
 
 
 def _enforce_capacities(
@@ -99,7 +121,8 @@ def _enforce_capacities(
     homes: dict[str, str],
     hierarchy: ResolvedHierarchy,
     policy: PolicyConfig,
-    access_counts: dict[str, int],
+    *,
+    trace: Trace | None = None,
 ) -> None:
     """Spill oversized tensors via policy fallbacks; updates ``homes`` in place."""
     enabled_ids = {level.id for level in hierarchy.enabled_levels}
@@ -117,21 +140,23 @@ def _enforce_capacities(
 
         if level.scope == "per_core":
             _enforce_per_core_pool(
-                pool_tensors, level, homes, policy, enabled_ids, access_counts
+                pool_tensors, level, hierarchy, homes, policy, enabled_ids, trace=trace
             )
         else:
             _enforce_chip_pool(
-                pool_tensors, level, homes, policy, enabled_ids, access_counts
+                pool_tensors, level, hierarchy, homes, policy, enabled_ids, trace=trace
             )
 
 
 def _enforce_chip_pool(
     pool_tensors: list[TensorRecord],
     level,
+    hierarchy: ResolvedHierarchy,
     homes: dict[str, str],
     policy: PolicyConfig,
     enabled_ids: set[str],
-    access_counts: dict[str, int],
+    *,
+    trace: Trace | None,
 ) -> None:
     """Enforce one chip-wide capacity pool (LtRAM or HBM)."""
     total = sum(tensor.bytes for tensor in pool_tensors)
@@ -141,8 +166,11 @@ def _enforce_chip_pool(
     if spill_target is None:
         return
     pool = list(pool_tensors)
+    retention, home_hop_bytes = _spill_retention_index(
+        trace, hierarchy, policy, homes, level.id, spill_target
+    )
     while total > level.capacity_bytes and pool:
-        victim = _pick_spill_victim(pool, access_counts, policy)
+        victim = _pick_spill_victim(pool, retention, home_hop_bytes, policy)
         pool.remove(victim)
         homes[victim.id] = spill_target
         total -= victim.bytes
@@ -151,10 +179,12 @@ def _enforce_chip_pool(
 def _enforce_per_core_pool(
     pool_tensors: list[TensorRecord],
     level,
+    hierarchy: ResolvedHierarchy,
     homes: dict[str, str],
     policy: PolicyConfig,
     enabled_ids: set[str],
-    access_counts: dict[str, int],
+    *,
+    trace: Trace | None,
 ) -> None:
     """Enforce per-NeuronCore capacity (SBUF, StRAM)."""
     spill_target = _resolve_spill_target(level.id, policy, enabled_ids)
@@ -170,8 +200,11 @@ def _enforce_per_core_pool(
         if total <= level.capacity_bytes:
             continue
         pool = list(core_tensors)
+        retention, home_hop_bytes = _spill_retention_index(
+            trace, hierarchy, policy, homes, level.id, spill_target
+        )
         while total > level.capacity_bytes and pool:
-            victim = _pick_spill_victim(pool, access_counts, policy)
+            victim = _pick_spill_victim(pool, retention, home_hop_bytes, policy)
             pool.remove(victim)
             homes[victim.id] = spill_target
             total -= victim.bytes

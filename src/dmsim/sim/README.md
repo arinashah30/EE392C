@@ -225,7 +225,7 @@ spill_victim_order: best_case   # or worst_case
 |--------------|------|
 | `home_level_by_category` | Initial home per tensor category |
 | `fallback_by_level` | Where to move tensors when a level is **disabled** or **over capacity** |
-| `spill_victim_order` | `best_case` (spill least-accessed) or `worst_case` (spill most-accessed); ties break on smaller/larger bytes |
+| `spill_victim_order` | `best_case` (spill lowest HBM−home transfer-cost savings) or `worst_case` (spill highest); ties on `tensor_id` |
 | *(omitted level in fallback)* | Falls back to **`hbm`** via `PolicyConfig.fallback_for()` |
 
 Example [`decode_ltram_only.yaml`](../../../configs/policies/decode_ltram_only.yaml): weights home in `ltram`, but `fallback_by_level: { ltram: hbm }` so overflow/disabled LtRAM goes **directly to HBM** — not through StRAM in the YAML stack order.
@@ -326,14 +326,16 @@ Steps in code:
 2. **Disabled tier** → [`_fallback_level`](../policies/placement.py) (L41) walks `policy.fallback_by_level` via [`_resolve_spill_target`](../policies/placement.py) (L56)
 3. **Over capacity** → [`_enforce_capacities`](../policies/placement.py) (L74) spills victims to policy fallback via [`_pick_spill_victim`](../policies/placement.py) (L88)
 
-**Spill victim order** uses access counts from the trace ([`Trace.access_counts()`](../trace/schema.py)) passed from [`run_simulation`](engine.py):
+**Spill victim order** uses a **residency-aware replay** ([`build_retention_by_residency_replay`](../sim/placement_replay.py)) with the same SBUF/kernel-wipe rules as the simulator:
+
+For each trace **read** that incurs a hop **from** the tensor’s home level `L`, add `latency_ns(F→sbuf) − latency_ns(L→sbuf)` (int ns) and track **home_hop_bytes**. Ties break on fewer home-hop bytes, then `tensor_id`.
 
 | `spill_victim_order` | Victim picked first |
 |----------------------|---------------------|
-| `best_case` (default) | **Least** accessed tensor (then smaller bytes on ties) |
-| `worst_case` | **Most** accessed tensor (then larger bytes on ties) |
+| `best_case` (default) | **Lowest** retention (least benefit from staying in `L`) |
+| `worst_case` | **Highest** retention |
 
-Tensors with no access events count as **0** accesses (spilled before hot tensors in `best_case`).
+Computed once per overflow pool (tensor residencies are independent).
 
 Spill/fallback resolution ([`_resolve_spill_target`](../policies/placement.py) L56–69):
 
@@ -809,7 +811,8 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 | `assign_home_levels` | L19 | Policy map + capacity spill → `homes` dict |
 | `_fallback_level` | L41 | Disabled tier → policy fallback chain |
 | `_resolve_spill_target` | L56 | Walk `fallback_by_level` until enabled target |
-| `_pick_spill_victim` | L88 | Choose victim by `spill_victim_order` + access counts |
+| `build_retention_by_residency_replay` | placement_replay | Residency-aware spill weights |
+| `_pick_spill_victim` | placement | Choose victim by retention value |
 | `_enforce_capacities` | L74 | Spill orchestration |
 | `_enforce_chip_pool` | L99 | LtRAM/HBM spill |
 | `_enforce_per_core_pool` | L119 | SBUF/StRAM spill |
@@ -842,7 +845,6 @@ Per-file index with line anchors. Paths relative to `src/dmsim/`.
 | `load_policy` | loader | L45 | Policy YAML → `PolicyConfig` |
 | `load_hierarchy` | loader | L62 | Hierarchy YAML → `ResolvedHierarchy` |
 | `PolicyConfig` | models | L91 | `home_level_by_category`, `fallback_by_level`, `spill_victim_order`, `fallback_for()` |
-| `Trace.access_counts` | schema | L90 | Access events per tensor for spill ordering |
 | `ResolvedHierarchy` | models | L111 | Levels, links, kernel config |
 | `link_bandwidth_GBs` | models | L145 | Effective hop bandwidth |
 

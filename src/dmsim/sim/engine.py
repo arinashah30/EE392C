@@ -55,7 +55,10 @@ def run_simulation(
 ) -> SimulationResult:
     tensor_map = trace.tensor_map()
     homes = assign_home_levels(
-        trace.tensors, hierarchy, policy, access_counts=trace.access_counts()
+        trace.tensors,
+        hierarchy,
+        policy,
+        trace=trace,
     )
     deepest = _deepest_enabled(hierarchy)
 
