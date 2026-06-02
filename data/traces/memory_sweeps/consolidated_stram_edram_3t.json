@@ -1,0 +1,306 @@
+{
+  "sweep_kind": "stram",
+  "technology": "edram_3t",
+  "trace": "chip_cores_0_1_2_3",
+  "trace_path": "data/traces/llama32_1b_decode_4core_min1_no_unknown.json",
+  "baseline": {
+    "hierarchy": "configs/hierarchy/trainium2_baseline.yaml",
+    "policy": "configs/policies/baseline_hbm.yaml"
+  },
+  "candidate": {
+    "policy": "configs/policies/decode_stram_only.yaml",
+    "hierarchy_template": "trainium2_stram_{pct}pct_sbuf_edram_3t.yaml"
+  },
+  "fractions_pct": [
+    10,
+    25,
+    50,
+    75
+  ],
+  "spill_orders": [
+    "best_case",
+    "worst_case"
+  ],
+  "runs": [
+    {
+      "replacement_pct": 10,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_10pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4490971.442889224,
+          "pct_change": 0.0
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17522481597203.854,
+          "pct_change": 0.0
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 26179636,
+          "pct_change": 0.0
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_10pct_sbuf_edram_3t",
+        "total_time_ns": 4490971.442889224,
+        "total_energy_pJ": 17522481597203.854,
+        "hbm_traffic_bytes": 26179636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 4070,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_10pct_best_case.json"
+    },
+    {
+      "replacement_pct": 10,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_10pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4490971.442889224,
+          "pct_change": 0.0
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17522481597203.854,
+          "pct_change": 0.0
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 26179636,
+          "pct_change": 0.0
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_10pct_sbuf_edram_3t",
+        "total_time_ns": 4490971.442889224,
+        "total_energy_pJ": 17522481597203.854,
+        "hbm_traffic_bytes": 26179636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 4070,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_10pct_worst_case.json"
+    },
+    {
+      "replacement_pct": 25,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_25pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4492405.851410968,
+          "pct_change": 0.03193982727313023
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17545943886736.502,
+          "pct_change": 0.1338982118628244
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 26040368,
+          "pct_change": -0.5319707271713022
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_25pct_sbuf_edram_3t",
+        "total_time_ns": 4492405.851410968,
+        "total_energy_pJ": 17545943886736.502,
+        "hbm_traffic_bytes": 26040368,
+        "transfers_by_hop": {
+          "hbm->sbuf": 4052,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_25pct_best_case.json"
+    },
+    {
+      "replacement_pct": 25,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_25pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4492405.851410968,
+          "pct_change": 0.03193982727313023
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17545943886736.502,
+          "pct_change": 0.1338982118628244
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 26040368,
+          "pct_change": -0.5319707271713022
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_25pct_sbuf_edram_3t",
+        "total_time_ns": 4492405.851410968,
+        "total_energy_pJ": 17545943886736.502,
+        "hbm_traffic_bytes": 26040368,
+        "transfers_by_hop": {
+          "hbm->sbuf": 4052,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_25pct_worst_case.json"
+    },
+    {
+      "replacement_pct": 50,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_50pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4490587.420150099,
+          "pct_change": -0.008550994901838587
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17569387149694.3,
+          "pct_change": 0.2676878399343402
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 25294840,
+          "pct_change": -3.379710856178444
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_50pct_sbuf_edram_3t",
+        "total_time_ns": 4490587.420150099,
+        "total_energy_pJ": 17569387149694.3,
+        "hbm_traffic_bytes": 25294840,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3947,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_50pct_best_case.json"
+    },
+    {
+      "replacement_pct": 50,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_50pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4490587.420150099,
+          "pct_change": -0.008550994901838587
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17569387149694.3,
+          "pct_change": 0.2676878399343402
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 25294840,
+          "pct_change": -3.379710856178444
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_50pct_sbuf_edram_3t",
+        "total_time_ns": 4490587.420150099,
+        "total_energy_pJ": 17569387149694.3,
+        "hbm_traffic_bytes": 25294840,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3947,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_50pct_worst_case.json"
+    },
+    {
+      "replacement_pct": 75,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_75pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4492975.761480548,
+          "pct_change": 0.04462995627589992
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17617774794583.918,
+          "pct_change": 0.5438339133155138
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 24901580,
+          "pct_change": -4.8818707792575875
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_75pct_sbuf_edram_3t",
+        "total_time_ns": 4492975.761480548,
+        "total_energy_pJ": 17617774794583.918,
+        "hbm_traffic_bytes": 24901580,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3886,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_75pct_best_case.json"
+    },
+    {
+      "replacement_pct": 75,
+      "replacement_target": "sbuf",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_stram_75pct_sbuf_edram_3t",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4492975.761480548,
+          "pct_change": 0.04462995627589992
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 17617774794583.918,
+          "pct_change": 0.5438339133155138
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 24901580,
+          "pct_change": -4.8818707792575875
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_stram_75pct_sbuf_edram_3t",
+        "total_time_ns": 4492975.761480548,
+        "total_energy_pJ": 17617774794583.918,
+        "hbm_traffic_bytes": 24901580,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3886,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_75pct_worst_case.json"
+    }
+  ]
+}

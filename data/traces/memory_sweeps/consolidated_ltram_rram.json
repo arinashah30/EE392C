@@ -1,0 +1,314 @@
+{
+  "sweep_kind": "ltram",
+  "technology": "rram",
+  "trace": "chip_cores_0_1_2_3",
+  "trace_path": "data/traces/llama32_1b_decode_4core_min1_no_unknown.json",
+  "baseline": {
+    "hierarchy": "configs/hierarchy/trainium2_baseline.yaml",
+    "policy": "configs/policies/baseline_hbm.yaml"
+  },
+  "candidate": {
+    "policy": "configs/policies/decode_ltram_only.yaml",
+    "hierarchy_template": "trainium2_ltram_{pct}pct_hbm_rram.yaml"
+  },
+  "fractions_pct": [
+    10,
+    25,
+    50,
+    75
+  ],
+  "spill_orders": [
+    "best_case",
+    "worst_case"
+  ],
+  "runs": [
+    {
+      "replacement_pct": 10,
+      "replacement_target": "hbm",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_10pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4476834.242889216,
+          "pct_change": -0.31479158083696485
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 13646177688392.213,
+          "pct_change": -22.121888884906582
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 22591332,
+          "pct_change": -13.706470173993251
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_10pct_hbm_rram",
+        "total_time_ns": 4476834.242889216,
+        "total_energy_pJ": 13646177688392.213,
+        "hbm_traffic_bytes": 22591332,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3563,
+          "sbuf->hbm": 134396,
+          "ltram->sbuf": 507
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_10pct_best_case.json"
+    },
+    {
+      "replacement_pct": 10,
+      "replacement_target": "hbm",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_10pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4479414.842889213,
+          "pct_change": -0.257329625604922
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 13635208262030.53,
+          "pct_change": -22.18449089878705
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 24820496,
+          "pct_change": -5.191592427029925
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_10pct_hbm_rram",
+        "total_time_ns": 4479414.842889213,
+        "total_energy_pJ": 13635208262030.53,
+        "hbm_traffic_bytes": 24820496,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3623,
+          "ltram->sbuf": 447,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_10pct_worst_case.json"
+    },
+    {
+      "replacement_pct": 25,
+      "replacement_target": "hbm",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_25pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4466175.242889215,
+          "pct_change": -0.5521344394044102
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 10051005685906.186,
+          "pct_change": -42.639370855381166
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 21846636,
+          "pct_change": -16.55103226034159
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_25pct_hbm_rram",
+        "total_time_ns": 4466175.242889215,
+        "total_energy_pJ": 10051005685906.186,
+        "hbm_traffic_bytes": 21846636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3202,
+          "ltram->sbuf": 868,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_25pct_best_case.json"
+    },
+    {
+      "replacement_pct": 25,
+      "replacement_target": "hbm",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_25pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4466175.242889215,
+          "pct_change": -0.5521344394044102
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 10051005685906.186,
+          "pct_change": -42.639370855381166
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 21846636,
+          "pct_change": -16.55103226034159
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_25pct_hbm_rram",
+        "total_time_ns": 4466175.242889215,
+        "total_energy_pJ": 10051005685906.186,
+        "hbm_traffic_bytes": 21846636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3202,
+          "ltram->sbuf": 868,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_25pct_worst_case.json"
+    },
+    {
+      "replacement_pct": 50,
+      "replacement_target": "hbm",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_50pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4466175.242889215,
+          "pct_change": -0.5521344394044102
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 10051005685906.186,
+          "pct_change": -42.639370855381166
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 21846636,
+          "pct_change": -16.55103226034159
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_50pct_hbm_rram",
+        "total_time_ns": 4466175.242889215,
+        "total_energy_pJ": 10051005685906.186,
+        "hbm_traffic_bytes": 21846636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3202,
+          "ltram->sbuf": 868,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_50pct_best_case.json"
+    },
+    {
+      "replacement_pct": 50,
+      "replacement_target": "hbm",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_50pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4466175.242889215,
+          "pct_change": -0.5521344394044102
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 10051005685906.186,
+          "pct_change": -42.639370855381166
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 21846636,
+          "pct_change": -16.55103226034159
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_50pct_hbm_rram",
+        "total_time_ns": 4466175.242889215,
+        "total_energy_pJ": 10051005685906.186,
+        "hbm_traffic_bytes": 21846636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3202,
+          "ltram->sbuf": 868,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_50pct_worst_case.json"
+    },
+    {
+      "replacement_pct": 75,
+      "replacement_target": "hbm",
+      "spill_victim_order": "best_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_75pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4466175.242889215,
+          "pct_change": -0.5521344394044102
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 10051005685906.186,
+          "pct_change": -42.639370855381166
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 21846636,
+          "pct_change": -16.55103226034159
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_75pct_hbm_rram",
+        "total_time_ns": 4466175.242889215,
+        "total_energy_pJ": 10051005685906.186,
+        "hbm_traffic_bytes": 21846636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3202,
+          "ltram->sbuf": 868,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_75pct_best_case.json"
+    },
+    {
+      "replacement_pct": 75,
+      "replacement_target": "hbm",
+      "spill_victim_order": "worst_case",
+      "comparison": {
+        "baseline": "trainium2_baseline",
+        "candidate": "trainium2_ltram_75pct_hbm_rram",
+        "time_ns": {
+          "baseline": 4490971.442889224,
+          "candidate": 4466175.242889215,
+          "pct_change": -0.5521344394044102
+        },
+        "energy_pJ": {
+          "baseline": 17522481597203.854,
+          "candidate": 10051005685906.186,
+          "pct_change": -42.639370855381166
+        },
+        "hbm_traffic_bytes": {
+          "baseline": 26179636,
+          "candidate": 21846636,
+          "pct_change": -16.55103226034159
+        }
+      },
+      "candidate": {
+        "hierarchy_name": "trainium2_ltram_75pct_hbm_rram",
+        "total_time_ns": 4466175.242889215,
+        "total_energy_pJ": 10051005685906.186,
+        "hbm_traffic_bytes": 21846636,
+        "transfers_by_hop": {
+          "hbm->sbuf": 3202,
+          "ltram->sbuf": 868,
+          "sbuf->hbm": 134396
+        }
+      },
+      "per_run_json": "data/traces/memory_sweeps/runs/compare_ltram_rram_75pct_worst_case.json"
+    }
+  ]
+}

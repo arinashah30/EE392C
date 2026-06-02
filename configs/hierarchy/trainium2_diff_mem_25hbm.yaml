@@ -21,7 +21,7 @@ levels:
 
   - id: sbuf
     enabled: true
-    tech: sbuf_trainium2
+    tech: tsmc_n22_sram
     scope: per_core
     capacity_bytes: 29360128 # TODO: change to what documentation says
 

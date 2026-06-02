@@ -18,25 +18,25 @@ levels:
     enabled: true
     tech: psum_trainium2
     scope: per_core
-    capacity_bytes: 2097152
+    capacity_bytes: 2097152 # 2 MiB
 
   - id: sbuf
     enabled: true
-    tech: sbuf_trainium2
+    tech: tsmc_n22_sram
     scope: per_core
-    capacity_bytes: 29360128
+    capacity_bytes: 29360128 # 28 MiB
 
   - id: stram
     enabled: false
     tech: edram_1t1c
     scope: per_core
-    capacity_bytes: 33554432
+    capacity_bytes: 0
 
   - id: ltram
     enabled: false
     tech: rram
     scope: per_chip
-    capacity_bytes: 1073741824
+    capacity_bytes: 0
 
   - id: hbm
     enabled: true
