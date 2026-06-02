@@ -1,0 +1,13 @@
+name: tsmc_n5_sram
+class: sram
+volatile: true
+retention_s: null
+# Extrapolated from CACTI partition sweep + log-log fit on nodes [45, 32, 22] nm
+# CACTI cycle_time_ns (0.4621) is internal array clock floor, not simulator latency
+cell_density_bits_per_um2: 8.053
+
+access:
+  read_latency_ns: 0.7866
+  write_latency_ns: 0.7866
+  read_energy_pJ_per_bit: 0.01144
+  write_energy_pJ_per_bit: 0.03438
