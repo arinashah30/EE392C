@@ -3,17 +3,20 @@ name: edram_3t
 class: edram
 volatile: true
 # Retention: 0.3–2 ms; 0.8 ms worst-case @ 0.18 µm single-supply
-retention_s: 0.0008
+retention_s: 0.000077
+
+refresh_interval_s: 0.000077
+refresh_energy_pJ_per_bit: 0.021
 
 # ~2× bit-cell density vs 6T SRAM (~4.9 bits/µm² derived vs 1T1C 4.5× scaling)
-cell_density_bits_per_um2: 4.9
+cell_density_bits_per_um2: 12.5
 
 access:
   # Read: 1.5–2.5 ns (IBM SOI 1.5 ns @ 500 MHz) | Write: 1.3–2.0 ns (non-destructive)
-  read_latency_ns: 2.0
-  write_latency_ns: 1.65
-  read_energy_pJ_per_bit: 1.5
-  write_energy_pJ_per_bit: 1.5
+  read_latency_ns: 2.5
+  write_latency_ns: 2.5
+  read_energy_pJ_per_bit: 0.04
+  write_energy_pJ_per_bit: 0.038
 
 notes:
   relative_cost: low-moderate
