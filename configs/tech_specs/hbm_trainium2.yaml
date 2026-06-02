@@ -1,17 +1,21 @@
+# https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=10595901
+# https://wangzeke.github.io/doc/shuhai_fccm_20.pdf
+
 name: hbm_trainium2
-class: hbm
+class: hbm # HBM2
 volatile: true
-retention_s: null
+retention_s: 0.032
 # Effective in-plane density for constant-area tradeoffs vs on-die LtRAM
-cell_density_bits_per_um2: 1.1
+# cell_density_bits_per_um2: 1.1
+cell_density_bits_per_um2: 961.538
 
 # Background refresh (modeled as periodic full refresh of allocated bytes).
 # Typical DRAM refresh window is on the order of 64 ms (device dependent).
-refresh_interval_s: 0.064
-refresh_energy_pJ_per_bit: 1.5
+refresh_interval_s: 0.032
+refresh_energy_pJ_per_bit: 7.8
 
 access:
-  read_latency_ns: 120
-  write_latency_ns: 120
-  read_energy_pJ_per_bit: 7.0
-  write_energy_pJ_per_bit: 8.0
+  read_latency_ns: 122.2
+  write_latency_ns: 122.2 
+  read_energy_pJ_per_bit: 3.9
+  write_energy_pJ_per_bit: 3.9
