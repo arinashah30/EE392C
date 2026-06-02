@@ -2,16 +2,23 @@
 Tensor name mapper for AWS Neuron profiling / Neuron Explorer JSON.
 
 Maps generic NEFF names (input0, input1, …) to semantic names and simulator
-categories (weight, kv_cache, activation, …) using LLaMA-style layout heuristics.
+categories (weight, kv_cache, activation, …) using architecture heuristics
+(LLaMA dense decode and Qwen1.5-MoE / Qwen2-MoE on Trainium).
 """
 
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 from dmsim.trace.schema import TensorCategory
+
+KvLayout = Literal["bshd", "bhsd"]
+NameMapper = Union["LLaMANameMapper", "QwenMoENameMapper"]
+
+_INPUT_INDEX_RE = re.compile(r"^input(\d+)$")
 
 
 @dataclass
@@ -23,6 +30,62 @@ class SemanticTensorInfo:
     component: str              # e.g., "key_cache", "wq", "gate_proj"
     description: str            # Human-readable description
     shape_description: str      # e.g., "(batch, seq_len, n_kv_heads, head_dim)"
+
+
+def parse_shape(shape_str: str) -> Optional[Tuple[int, ...]]:
+    """Parse shape string like '[1 128 2 64]' to tuple."""
+    if not shape_str:
+        return None
+    shape_str = shape_str.strip("[]")
+    parts = shape_str.split()
+    try:
+        return tuple(int(p) for p in parts)
+    except ValueError:
+        return None
+
+
+def classify_kv_shape(shape: Tuple[int, ...]) -> Optional[KvLayout]:
+    """Return KV layout tag if *shape* looks like an attention KV cache tensor."""
+    if len(shape) == 4:
+        if shape[2] == 1 and shape[3] == 1:
+            return None
+        batch, d1, d2, d3 = shape
+        if d3 not in (64, 128):
+            return None
+        # (batch, seq, n_kv_heads, head_dim) — Llama-style decode
+        if d1 >= 8 and d2 <= 32:
+            return "bshd"
+        # (batch, n_kv_heads, seq, head_dim) — Qwen MoE decode on trn2
+        if d1 <= 32 and d2 >= 8:
+            return "bhsd"
+    if len(shape) == 5:
+        batch, d1, d2, kv_pack, head_dim = shape
+        if kv_pack != 2 or head_dim not in (64, 128):
+            return None
+        if d1 >= 8 and d2 <= 32:
+            return "bshd"
+        if d1 <= 32 and d2 >= 8:
+            return "bhsd"
+    return None
+
+
+def is_kv_cache_shape(shape: Tuple[int, ...]) -> bool:
+    return classify_kv_shape(shape) is not None
+
+
+def kv_shape_description(layout: KvLayout, *, rank: int = 4) -> str:
+    if rank == 5:
+        return "(batch, seq_or_heads, heads_or_seq, {k,v}, head_dim)"
+    if layout == "bhsd":
+        return "(batch, n_kv_heads, seq_len, head_dim)"
+    return "(batch, seq_len, n_kv_heads, head_dim)"
+
+
+def _input_index(var_name: str) -> Optional[int]:
+    match = _INPUT_INDEX_RE.match(var_name)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 class LLaMANameMapper:
@@ -48,6 +111,7 @@ class LLaMANameMapper:
     CATEGORY_NORM = "norm_weight"
     CATEGORY_OUTPUT = "output_weight"
     CATEGORY_WEIGHT = "weight"
+    CATEGORY_MOE = "moe_weight"
     CATEGORY_UNKNOWN = "unknown"
     
     def __init__(self, 
@@ -102,9 +166,9 @@ class LLaMANameMapper:
             var_name = t.get('variable_name', '')
             
             # Parse shape string "[1 128 2 64]" -> (1, 128, 2, 64)
-            shape = cls._parse_shape(shape_str)
+            shape = parse_shape(shape_str)
             
-            if shape and cls._is_kv_cache_shape(shape) and var_name.startswith("input"):
+            if shape and is_kv_cache_shape(shape) and var_name.startswith("input"):
                 kv_cache_tensors.append((var_name, shape))
             elif shape and len(shape) == 2:
                 # Could be embedding if large vocab
@@ -113,11 +177,13 @@ class LLaMANameMapper:
         
         # Infer config from KV cache
         if kv_cache_tensors:
+            kv_cache_tensors.sort(key=lambda item: _input_index(item[0]) or 0)
             _, shape = kv_cache_tensors[0]
-            batch_size = shape[0]
-            seq_len = shape[1]
-            n_kv_heads_per_tp = shape[2]
-            head_dim = shape[3]
+            layout = classify_kv_shape(shape) or "bshd"
+            if layout == "bhsd":
+                batch_size, n_kv_heads_per_tp, seq_len, head_dim = shape
+            else:
+                batch_size, seq_len, n_kv_heads_per_tp, head_dim = shape
             n_layers = max(1, len(kv_cache_tensors) // 2)  # K and V per layer
         else:
             # Defaults
@@ -154,36 +220,11 @@ class LLaMANameMapper:
     
     @staticmethod
     def _parse_shape(shape_str: str) -> Optional[Tuple[int, ...]]:
-        """Parse shape string like '[1 128 2 64]' to tuple."""
-        if not shape_str:
-            return None
-        # Remove brackets and split
-        shape_str = shape_str.strip('[]')
-        parts = shape_str.split()
-        try:
-            return tuple(int(p) for p in parts)
-        except ValueError:
-            return None
+        return parse_shape(shape_str)
 
     @staticmethod
     def _is_kv_cache_shape(shape: Tuple[int, ...]) -> bool:
-        """True for attention KV tensors, not compiler temporaries.
-
-        Supports common layouts seen in Neuron profiles:
-        - 4D: (batch, seq, n_kv_heads, head_dim)
-        - 5D: (batch, seq, n_kv_heads, 2, head_dim) where the 2 packs K/V
-        """
-        if len(shape) == 4:
-            if shape[2] == 1 and shape[3] == 1:
-                return False
-            _batch, _seq, n_heads, head_dim = shape
-            return n_heads <= 16 and head_dim in (64, 128)
-        if len(shape) == 5:
-            _batch, _seq, n_heads, kv_pack, head_dim = shape
-            if kv_pack != 2:
-                return False
-            return n_heads <= 16 and head_dim in (64, 128)
-        return False
+        return is_kv_cache_shape(shape)
     
     def map_tensor(self, var_name: str, shape_str: str, tensor_type: str) -> SemanticTensorInfo:
         """
@@ -265,20 +306,14 @@ class LLaMANameMapper:
 
         # Heuristic KV detection: some exports use higher input indices and/or 5D packed shapes.
         if shape and self._is_kv_cache_shape(shape):
-            # Prefer stable semantic names even when the input index doesn't match the
-            # "input3..input(3+2*n_layers)" convention.
-            shape_desc = (
-                "(batch, seq_len, n_kv_heads, head_dim)"
-                if len(shape) == 4
-                else "(batch, seq_len, n_kv_heads, {k,v}, head_dim)"
-            )
+            layout = classify_kv_shape(shape) or "bshd"
             return SemanticTensorInfo(
                 semantic_name=f"{var_name}_kv_cache",
                 category=self.CATEGORY_KV_CACHE,
                 layer_index=-1,
                 component="kv_cache",
                 description="KV cache (shape-detected)",
-                shape_description=shape_desc,
+                shape_description=kv_shape_description(layout, rank=len(shape)),
             )
         
         # KV Cache (input3 to input3 + 2*n_layers - 1)
@@ -545,6 +580,7 @@ class LLaMANameMapper:
             self.CATEGORY_EMBEDDING: "Embedding (token embedding matrix)",
             self.CATEGORY_ATTENTION: "Attention Weight (Q/K/V/O projections)",
             self.CATEGORY_MLP: "MLP Weight (feed-forward network)",
+            self.CATEGORY_MOE: "MoE Weight (router / expert projections)",
             self.CATEGORY_NORM: "Normalization Weight (RMSNorm/LayerNorm)",
             self.CATEGORY_OUTPUT: "Output (logits, final projection)",
             self.CATEGORY_UNKNOWN: "Unknown/Compiler-generated",
@@ -552,7 +588,381 @@ class LLaMANameMapper:
         return descriptions.get(category, category)
 
 
-def create_mapper_for_tensors(tensors: List[Dict]) -> LLaMANameMapper:
+class QwenMoENameMapper(LLaMANameMapper):
+    """Mapper for Qwen1.5-MoE / Qwen2-MoE decode graphs on Trainium.
+
+    Qwen MoE NEFFs differ from Llama dense decode:
+    - KV cache uses (batch, n_kv_heads, seq, head_dim) instead of (batch, seq, heads, dim)
+    - Weights are shape-tagged (router/expert/shared-attn) rather than a fixed 9-input block
+    """
+
+    def __init__(
+        self,
+        *,
+        num_experts: int = 60,
+        moe_intermediate_size: int = 1408,
+        kv_layout: KvLayout = "bhsd",
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.num_experts = num_experts
+        self.moe_intermediate_size = moe_intermediate_size
+        self.kv_layout = kv_layout
+        self._kv_slots: dict[str, tuple[int, bool]] = {}
+        self._layer_groups: dict[str, list[str]] = {}
+
+    @classmethod
+    def auto_detect_config(cls, tensors: List[Dict]) -> "QwenMoENameMapper":
+        kv_cache_tensors: list[tuple[str, Tuple[int, ...]]] = []
+        embedding_tensor: Optional[tuple[str, Tuple[int, ...]]] = None
+        lm_head_tensor: Optional[tuple[str, Tuple[int, ...]]] = None
+        expert_counts: list[int] = []
+
+        for t in tensors:
+            shape_str = t.get("shape", "")
+            var_name = t.get("variable_name", "")
+            shape = parse_shape(shape_str)
+            if not shape or not var_name.startswith("input"):
+                continue
+            if is_kv_cache_shape(shape):
+                kv_cache_tensors.append((var_name, shape))
+            elif len(shape) == 2:
+                if shape[0] > 100_000:
+                    lm_head_tensor = (var_name, shape)
+                elif shape[0] > 5_000:
+                    embedding_tensor = (var_name, shape)
+                elif _is_plausible_expert_count(shape[0]) and shape[1] >= 512:
+                    expert_counts.append(shape[0])
+            elif len(shape) == 3 and _is_plausible_expert_count(shape[0]) and shape[2] >= 512:
+                expert_counts.append(shape[0])
+
+        if kv_cache_tensors:
+            kv_cache_tensors.sort(key=lambda item: _input_index(item[0]) or 0)
+            _, shape = kv_cache_tensors[0]
+            layout = classify_kv_shape(shape) or "bhsd"
+            if layout == "bhsd":
+                batch_size, n_kv_heads_per_tp, seq_len, head_dim = shape
+            else:
+                batch_size, seq_len, n_kv_heads_per_tp, head_dim = shape
+            n_layers = max(1, len(kv_cache_tensors) // 2)
+        else:
+            layout = "bhsd"
+            batch_size, seq_len, n_kv_heads_per_tp, head_dim = 1, 256, 4, 128
+            n_layers = 24
+
+        num_experts = max(expert_counts, default=60) if expert_counts else 60
+
+        if embedding_tensor and lm_head_tensor:
+            _, emb_shape = embedding_tensor
+            _, lm_shape = lm_head_tensor
+            hidden_size = emb_shape[1]
+            vocab_size = lm_shape[0]
+            tp_degree = max(1, vocab_size // max(emb_shape[0], 1))
+        elif embedding_tensor:
+            _, emb_shape = embedding_tensor
+            hidden_size = emb_shape[1]
+            tp_degree = 4
+            vocab_size = emb_shape[0] * tp_degree
+        elif lm_head_tensor:
+            _, lm_shape = lm_head_tensor
+            vocab_size = lm_shape[0]
+            hidden_tp = lm_shape[1]
+            tp_degree = 4
+            hidden_size = hidden_tp * tp_degree
+        else:
+            vocab_size = 151_936
+            hidden_size = 2048
+            tp_degree = 4
+
+        moe_intermediate = 1408
+        for t in tensors:
+            shape = parse_shape(t.get("shape", ""))
+            if not shape or len(shape) != 2:
+                continue
+            if shape[0] == hidden_size and 256 < shape[1] < hidden_size:
+                moe_intermediate = shape[1]
+                break
+            if shape[1] == hidden_size and 256 < shape[0] < hidden_size:
+                moe_intermediate = shape[0]
+                break
+
+        mapper = cls(
+            n_layers=n_layers,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            hidden_size=hidden_size,
+            n_heads=16,
+            n_kv_heads=n_kv_heads_per_tp * tp_degree,
+            head_dim=head_dim,
+            vocab_size=vocab_size,
+            tp_degree=tp_degree,
+            num_experts=num_experts,
+            moe_intermediate_size=moe_intermediate,
+            kv_layout=layout,
+        )
+        mapper._build_index_maps(tensors)
+        return mapper
+
+    def _build_index_maps(self, tensors: List[Dict]) -> None:
+        kv_ordered: list[str] = []
+        groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
+
+        for t in tensors:
+            var_name = str(t.get("variable_name") or "")
+            shape_str = str(t.get("shape") or "")
+            idx = _input_index(var_name)
+            if idx is None:
+                continue
+            shape = parse_shape(shape_str)
+            if shape and is_kv_cache_shape(shape):
+                kv_ordered.append(var_name)
+            groups[shape_str].append((idx, var_name))
+
+        kv_ordered.sort(key=lambda name: _input_index(name) or 0)
+        for pos, name in enumerate(kv_ordered):
+            self._kv_slots[name] = (pos // 2, (pos % 2) == 0)
+
+        self._layer_groups = {
+            shape_str: [name for _, name in sorted(entries, key=lambda item: item[0])]
+            for shape_str, entries in groups.items()
+        }
+
+    def _layer_index_in_group(self, var_name: str, shape_str: str) -> int:
+        group = self._layer_groups.get(shape_str, [])
+        if var_name not in group:
+            return -1
+        pos = group.index(var_name)
+        n = len(group)
+        if n == self.n_layers:
+            return pos
+        if n == 2 * self.n_layers:
+            return pos // 2
+        if n == self.n_layers * 2 and pos < self.n_layers:
+            return pos
+        return -1
+
+    def _map_input_tensor(self, idx: int, var_name: str, shape_str: str) -> SemanticTensorInfo:
+        shape = self._parse_shape(shape_str)
+
+        if idx == 0:
+            return SemanticTensorInfo(
+                semantic_name="tokens",
+                category=self.CATEGORY_RUNTIME,
+                layer_index=-1,
+                component="token_ids",
+                description="Input token IDs (decode)",
+                shape_description=shape_str or "(batch, seq)",
+            )
+        if idx == 1:
+            return SemanticTensorInfo(
+                semantic_name="position",
+                category=self.CATEGORY_RUNTIME,
+                layer_index=-1,
+                component="position_index",
+                description="Sequence position / cache index",
+                shape_description=shape_str or "(batch, seq, …)",
+            )
+        if idx == 2:
+            return SemanticTensorInfo(
+                semantic_name="attention_mask",
+                category=self.CATEGORY_RUNTIME,
+                layer_index=-1,
+                component="attention_mask",
+                description="Attention mask",
+                shape_description=shape_str or "(batch, seq)",
+            )
+
+        if shape and self._is_kv_cache_shape(shape):
+            if var_name in self._kv_slots:
+                layer_idx, is_key = self._kv_slots[var_name]
+                cache_type = "cache_k" if is_key else "cache_v"
+                cache_name = "Key Cache" if is_key else "Value Cache"
+                return SemanticTensorInfo(
+                    semantic_name=f"layer_{layer_idx}.{cache_type}",
+                    category=self.CATEGORY_KV_CACHE,
+                    layer_index=layer_idx,
+                    component=cache_type,
+                    description=f"Layer {layer_idx} Attention {cache_name}",
+                    shape_description=kv_shape_description(self.kv_layout, rank=len(shape)),
+                )
+            return SemanticTensorInfo(
+                semantic_name=f"{var_name}_kv_cache",
+                category=self.CATEGORY_KV_CACHE,
+                layer_index=-1,
+                component="kv_cache",
+                description="KV cache (shape-detected)",
+                shape_description=kv_shape_description(self.kv_layout, rank=len(shape)),
+            )
+
+        moe_info = self._map_moe_weight_shape(var_name, shape_str, shape)
+        if moe_info is not None:
+            return moe_info
+
+        return self._infer_from_shape(var_name, shape_str, shape)
+
+    def _map_moe_weight_shape(
+        self,
+        var_name: str,
+        shape_str: str,
+        shape: Optional[Tuple[int, ...]],
+    ) -> Optional[SemanticTensorInfo]:
+        if shape is None:
+            return None
+
+        hidden_tp = self.hidden_size // max(self.tp_degree, 1)
+        attn_proj = self.n_heads * self.head_dim // max(self.tp_degree, 1)
+
+        if len(shape) == 2 and shape[0] > 50_000:
+            return SemanticTensorInfo(
+                semantic_name="output.weight",
+                category=self.CATEGORY_OUTPUT,
+                layer_index=-1,
+                component="lm_head",
+                description="Output projection (lm_head)",
+                shape_description="(vocab_size, hidden_size/tp)",
+            )
+        if len(shape) == 2 and shape[0] > 5_000 and shape[1] == self.hidden_size:
+            return SemanticTensorInfo(
+                semantic_name="embedding.weight",
+                category=self.CATEGORY_EMBEDDING,
+                layer_index=-1,
+                component="embedding",
+                description="Token embedding weight matrix (TP shard)",
+                shape_description="(vocab_size/tp, hidden_size)",
+            )
+
+        layer_idx = self._layer_index_in_group(var_name, shape_str)
+        if layer_idx < 0:
+            return None
+
+        if len(shape) == 2 and shape[0] == self.num_experts and shape[1] == self.hidden_size:
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.moe.router.gate.weight",
+                category=self.CATEGORY_MOE,
+                layer_index=layer_idx,
+                component="moe_router",
+                description=f"Layer {layer_idx} MoE router gate",
+                shape_description="(num_experts, hidden_size)",
+            )
+        if (
+            len(shape) == 3
+            and shape[0] == self.num_experts
+            and shape[2] == self.hidden_size
+        ):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.moe.expert.gate_up.weight",
+                category=self.CATEGORY_MOE,
+                layer_index=layer_idx,
+                component="moe_expert_gate_up",
+                description=f"Layer {layer_idx} expert gate+up (packed)",
+                shape_description="(num_experts, intermediate/tp, hidden_size)",
+            )
+        if (
+            len(shape) == 3
+            and shape[0] == self.num_experts
+            and shape[1] == self.hidden_size
+        ):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.moe.expert.down_proj.weight",
+                category=self.CATEGORY_MOE,
+                layer_index=layer_idx,
+                component="moe_expert_down",
+                description=f"Layer {layer_idx} expert down projection",
+                shape_description="(num_experts, hidden_size, intermediate/tp)",
+            )
+        if len(shape) == 2 and shape == (self.hidden_size, attn_proj):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.attention.wq.weight",
+                category=self.CATEGORY_ATTENTION,
+                layer_index=layer_idx,
+                component="wq",
+                description=f"Layer {layer_idx} query projection",
+                shape_description="(hidden_size, n_heads*head_dim/tp)",
+            )
+        if len(shape) == 2 and shape == (attn_proj, self.hidden_size):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.attention.wo.weight",
+                category=self.CATEGORY_ATTENTION,
+                layer_index=layer_idx,
+                component="wo",
+                description=f"Layer {layer_idx} attention output projection",
+                shape_description="(n_heads*head_dim/tp, hidden_size)",
+            )
+        if len(shape) == 2 and shape == (self.hidden_size, self.moe_intermediate_size):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.mlp.shared.gate_proj.weight",
+                category=self.CATEGORY_MLP,
+                layer_index=layer_idx,
+                component="shared_gate_proj",
+                description=f"Layer {layer_idx} shared expert gate projection",
+                shape_description="(hidden_size, moe_intermediate)",
+            )
+        if len(shape) == 2 and shape == (self.moe_intermediate_size, self.hidden_size):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.mlp.shared.down_proj.weight",
+                category=self.CATEGORY_MLP,
+                layer_index=layer_idx,
+                component="shared_down_proj",
+                description=f"Layer {layer_idx} shared expert down projection",
+                shape_description="(moe_intermediate, hidden_size)",
+            )
+        if len(shape) == 2 and shape == (1, self.hidden_size):
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.input_layernorm.weight",
+                category=self.CATEGORY_NORM,
+                layer_index=layer_idx,
+                component="input_layernorm",
+                description=f"Layer {layer_idx} input RMSNorm",
+                shape_description="(hidden_size/tp,)",
+            )
+        if len(shape) == 1 and shape[0] == self.hidden_size:
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.norm.weight",
+                category=self.CATEGORY_NORM,
+                layer_index=layer_idx,
+                component="norm",
+                description=f"Layer {layer_idx} normalization weight",
+                shape_description="(hidden_size,)",
+            )
+        if len(shape) == 1 and shape[0] == attn_proj:
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.attention.bias",
+                category=self.CATEGORY_ATTENTION,
+                layer_index=layer_idx,
+                component="attention_bias",
+                description=f"Layer {layer_idx} attention bias",
+                shape_description="(proj/tp,)",
+            )
+
+        return None
+
+
+def _is_plausible_expert_count(n: int) -> bool:
+    return 4 <= n <= 256
+
+
+def _looks_like_qwen_moe_graph(tensors: List[Dict]) -> bool:
+    """True when NEFF inputs match Qwen MoE decode signatures."""
+    bhsd_kv = 0
+    expert_2d = 0
+    for t in tensors:
+        var_name = str(t.get("variable_name") or "")
+        if not var_name.startswith("input"):
+            continue
+        shape = parse_shape(str(t.get("shape") or ""))
+        if not shape:
+            continue
+        layout = classify_kv_shape(shape)
+        if layout == "bhsd":
+            bhsd_kv += 1
+        if len(shape) == 2 and _is_plausible_expert_count(shape[0]) and shape[1] >= 512:
+            expert_2d += 1
+        if len(shape) == 3 and _is_plausible_expert_count(shape[0]) and shape[2] >= 512:
+            expert_2d += 1
+    return bhsd_kv >= 4 or expert_2d >= 12
+
+
+def create_mapper_for_tensors(tensors: List[Dict]) -> NameMapper:
     """
     Create an appropriately configured mapper for a list of tensors.
     
@@ -560,8 +970,10 @@ def create_mapper_for_tensors(tensors: List[Dict]) -> LLaMANameMapper:
         tensors: List of tensor dicts with 'variable_name', 'shape', 'type'
     
     Returns:
-        Configured LLaMANameMapper
+        Configured name mapper for the NEFF tensor table.
     """
+    if _looks_like_qwen_moe_graph(tensors):
+        return QwenMoENameMapper.auto_detect_config(tensors)
     return LLaMANameMapper.auto_detect_config(tensors)
 
 
@@ -573,6 +985,7 @@ def mapper_category_to_sim(category: str, *, neff_type: str = "") -> TensorCateg
     if category in (
         LLaMANameMapper.CATEGORY_ATTENTION,
         LLaMANameMapper.CATEGORY_MLP,
+        LLaMANameMapper.CATEGORY_MOE,
         LLaMANameMapper.CATEGORY_EMBEDDING,
         LLaMANameMapper.CATEGORY_NORM,
         LLaMANameMapper.CATEGORY_WEIGHT,
@@ -739,7 +1152,7 @@ def _category_from_dma_shape(read_shape: object) -> TensorCategory | None:
                     dims.append(int(part))
                 except (TypeError, ValueError):
                     pass
-    if LLaMANameMapper._is_kv_cache_shape(tuple(dims)):
+    if is_kv_cache_shape(tuple(dims)):
         return TensorCategory.KV_CACHE
     if len(dims) == 2 and dims[0] > 1000:
         return TensorCategory.WEIGHT

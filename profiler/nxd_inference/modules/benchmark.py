@@ -1,0 +1,86 @@
+import time
+from functools import partial
+
+import numpy as np
+
+BENCHMARK_REPORT_FILENAME = "benchmark_report.json"
+
+
+class Benchmark:
+    def __init__(self, benchmark_func, input_param, num_runs=20, preprocess_func=None, post_warmup_func=None) -> None:
+        if isinstance(input_param, (tuple, list)):
+            self.benchmark_func = partial(benchmark_func, *input_param)
+        elif isinstance(input_param, dict):
+            self.benchmark_func = partial(benchmark_func, **input_param)
+        else:
+            self.benchmark_func = partial(benchmark_func, input_param)
+
+        self.num_runs = num_runs
+        self.preprocess_func = preprocess_func
+        self.post_warmup_func = post_warmup_func
+        self.latency_list = None
+
+    def run(self):
+        # Warm up
+        if self.preprocess_func:
+            self.preprocess_func()
+        self.benchmark_func()
+
+        if self.post_warmup_func:
+            self.post_warmup_func()
+
+        latency_collector = LatencyCollector()
+        for _ in range(self.num_runs):
+            latency_collector.pre_hook()
+            if self.preprocess_func:
+                self.preprocess_func()
+            self.benchmark_func()
+            latency_collector.hook()
+        self.latency_list = latency_collector.latency_list
+
+
+class LatencyCollector:
+    def __init__(self):
+        self.start = None
+        self.latency_list = []
+
+    def pre_hook(self, *args):
+        self.start = time.time()
+
+    def hook(self, *args):
+        self.latency_list.append(time.time() - self.start)
+
+
+def generate_report(latency_list, max_length=1, max_batch_size=1):
+    latency_array = np.array(latency_list)
+
+    n_runs = len(latency_list)
+    if n_runs == 0:
+        # Some sampling configurations never invoke a particular submodule
+        # (e.g. SoftMoE with custom routing skips one of the dispatch
+        # branches at warm-up). Return a stub so the surrounding code can
+        # still write benchmark_report.json instead of crashing on
+        # np.percentile of an empty array.
+        return {
+            "latency_ms_p50": float("nan"),
+            "latency_ms_p90": float("nan"),
+            "latency_ms_p95": float("nan"),
+            "latency_ms_p99": float("nan"),
+            "latency_ms_p100": float("nan"),
+            "latency_ms_avg": float("nan"),
+            "throughput": 0.0,
+        }
+    total_time = np.sum(latency_array)
+    # The max_length is set to 1 by default to support image encoding tasks,
+    # as these tasks do not involve the concept of a maximum sequence length.
+    throughput = (n_runs * max_length * max_batch_size) / total_time
+
+    return {
+        "latency_ms_p50": np.percentile(latency_array, 50) * 1000,
+        "latency_ms_p90": np.percentile(latency_array, 90) * 1000,
+        "latency_ms_p95": np.percentile(latency_array, 95) * 1000,
+        "latency_ms_p99": np.percentile(latency_array, 99) * 1000,
+        "latency_ms_p100": np.percentile(latency_array, 100) * 1000,
+        "latency_ms_avg": np.average(latency_array) * 1000,
+        "throughput": throughput,
+    }

@@ -29,6 +29,32 @@ def _bootstrap_lnc_from_argv() -> None:
 
 _bootstrap_lnc_from_argv()
 
+SHM_BASE = "/dev/shm"
+
+
+def _ensure_shm_env() -> None:
+    os.environ.setdefault("BASE_COMPILE_WORK_DIR", f"{SHM_BASE}/nxd_model_compile")
+    os.environ.setdefault("TMPDIR", f"{SHM_BASE}/tmp")
+    os.environ.setdefault("HF_HOME", f"{SHM_BASE}/huggingface")
+    os.environ.setdefault("TORCH_HOME", f"{SHM_BASE}/torch")
+    os.environ.setdefault("XLA_CACHE_DIR", f"{SHM_BASE}/xla_cache")
+    for key in ("BASE_COMPILE_WORK_DIR", "TMPDIR", "HF_HOME", "TORCH_HOME", "XLA_CACHE_DIR"):
+        os.makedirs(os.environ[key], exist_ok=True)
+
+
+def _assert_traced_on_shm(path: str) -> None:
+    if os.environ.get("ALLOW_DISK_ARTIFACTS", "").lower() in ("1", "true", "yes"):
+        return
+    abs_path = os.path.abspath(path.rstrip(os.sep))
+    if not abs_path.startswith(SHM_BASE + os.sep):
+        raise SystemExit(
+            f"compiled-model-path must be under {SHM_BASE}/ (got {abs_path}). "
+            "Set ALLOW_DISK_ARTIFACTS=1 to override."
+        )
+
+
+_ensure_shm_env()
+
 DEFAULT_MODEL_ID = "meta-llama/Llama-3.2-1B-Instruct"
 DEFAULT_TRACED_BASE = "/dev/shm/traced_model"
 DEFAULT_LNC = 1
@@ -121,7 +147,7 @@ def _nxdi_base_argv(args) -> list[str]:
 
 
 def _maybe_clean_compile_cache() -> None:
-    nxd_tmp = "/tmp/nxd_model"
+    nxd_tmp = os.environ.get("BASE_COMPILE_WORK_DIR", f"{SHM_BASE}/nxd_model_compile")
     if os.path.isdir(nxd_tmp):
         print(f"[clean] removing stale compile cache {nxd_tmp}")
         shutil.rmtree(nxd_tmp, ignore_errors=True)
@@ -142,6 +168,7 @@ def cmd_compile(args) -> None:
     if args.compiled_model_path is None:
         args.compiled_model_path = default_compiled_path(args)
     args.compiled_model_path = _ensure_trailing_sep(args.compiled_model_path)
+    _assert_traced_on_shm(args.compiled_model_path)
     os.makedirs(args.compiled_model_path, exist_ok=True)
 
     print("\n=== compile (NXDI) ===")
@@ -175,6 +202,7 @@ def cmd_run(args) -> None:
     apply_lnc(args.lnc)
     args.model_path = resolve_model_path(args.model_path)
     args.compiled_model_path = _ensure_trailing_sep(_resolve_compiled_path(args))
+    _assert_traced_on_shm(args.compiled_model_path)
 
     if not args.prompts:
         raise SystemExit("Pass at least one --prompt.")
