@@ -390,7 +390,7 @@ Details: [NEURON_PROFILE.md](NEURON_PROFILE.md#dma-record-shape-abbreviated).
 
 ## Open limitations
 
-1. Unattributed dynamic DMA (~100% on decode) cannot be tied to specific layers; synthetic `hbm_traffic_`* tensors approximate **category-level** HBM traffic.
+1. Unattributed dynamic DMA (~100% on decode) cannot be tied to specific layers; synthetic `hbm_traffic`_* tensors approximate **category-level** HBM traffic.
 2. HBM→SBUF loads are recorded with `target_level: sbuf` (destination), not `hbm`.
 3. Skip layout-opt captures (`579692064539910`) for simulation; use decode or prefill keys.
 4. Neuron SDK 2.29.1–2.30.x re-export does not improve dynamic-DMA naming for this capture; upstream fix requires Explorer/runtime correlation for `software_dynamic` / `hardware_dynamic` queues.

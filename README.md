@@ -96,7 +96,7 @@ dmsim pipeline \
   --output data/traces/sim_results_all_cores.json
 ```
 
-**Iso-area tradeoffs** (`trainium2_diff_mem.yaml`): fixed SBUF/HBM die area; StRAM/LtRAM capacities from `capacity = area × cell_density / 8`. **StRAM is per NeuronCore** (each core trades against its own SBUF area). **LtRAM is per chip** (trades against HBM area). See [`docs/AREA_BUDGET.md`](docs/AREA_BUDGET.md).
+**Iso-area tradeoffs** (`trainium2_diff_mem.yaml`): fixed SBUF/HBM die area; StRAM/LtRAM capacities from `capacity = area × cell_density / 8`. **StRAM is per NeuronCore** (each core trades against its own SBUF area). **LtRAM is per chip** (trades against HBM area). See `[docs/AREA_BUDGET.md](docs/AREA_BUDGET.md)`.
 
 Details: [docs/NEURON_PROFILE.md](docs/NEURON_PROFILE.md).
 
