@@ -30,6 +30,8 @@ class SimulationResult:
     time_by_core_ns: dict[int, float] = field(default_factory=dict)
     hbm_read_bytes: int = 0
     hbm_write_bytes: int = 0
+    cross_domain_read_bytes: int = 0
+    cross_domain_write_bytes: int = 0
     kernel_wipes: int = 0
     refresh_energy_pJ: float = 0.0
     refresh_cycles_by_level: dict[str, int] = field(default_factory=dict)
@@ -40,6 +42,11 @@ class SimulationResult:
     @property
     def hbm_traffic_bytes(self) -> int:
         return self.hbm_read_bytes + self.hbm_write_bytes
+
+    @property
+    def cross_domain_traffic_bytes(self) -> int:
+        """Bytes on hops crossing on_chip ↔ off_chip (HBM, LtRAM ↔ SBUF/StRAM/PSUM)."""
+        return self.cross_domain_read_bytes + self.cross_domain_write_bytes
 
     @property
     def worst_core_id(self) -> int | None:
@@ -449,6 +456,11 @@ def _charge_path(
             result.hbm_read_bytes += nbytes
         if hop_to == "hbm":
             result.hbm_write_bytes += nbytes
+        if from_level.interconnect != to_level.interconnect:
+            if from_level.interconnect == "off_chip":
+                result.cross_domain_read_bytes += nbytes
+            if to_level.interconnect == "off_chip":
+                result.cross_domain_write_bytes += nbytes
 
 
 def _accumulate_level(

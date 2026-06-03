@@ -262,7 +262,13 @@ def run_tier_tech_sweep(
                     "hierarchy_name": candidate_h.name,
                     "total_time_ns": cand_res["total_time_ns"],
                     "total_energy_pJ": cand_res["total_energy_pJ"],
-                    "hbm_traffic_bytes": cand_res["hbm_read_bytes"] + cand_res["hbm_write_bytes"],
+                    "hbm_traffic_bytes": (
+                        cand_res["hbm_read_bytes"] + cand_res["hbm_write_bytes"]
+                    ),
+                    "cross_domain_traffic_bytes": (
+                        cand_res.get("cross_domain_read_bytes", 0)
+                        + cand_res.get("cross_domain_write_bytes", 0)
+                    ),
                     "transfers_by_hop": cand_res["transfers_by_hop"],
                 },
             }
@@ -280,7 +286,7 @@ def run_tier_tech_sweep(
                     f"  {tier} {tech} {pct}% {spill}: "
                     f"time {c['time_ns']['pct_change']:+.2f}%  "
                     f"energy {c['energy_pJ']['pct_change']:+.2f}%  "
-                    f"hbm_traffic {c['hbm_traffic_bytes']['pct_change']:+.2f}%"
+                    f"off_chip_if {c['cross_domain_traffic_bytes']['pct_change']:+.2f}%"
                 )
 
     return {

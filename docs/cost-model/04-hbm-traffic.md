@@ -204,10 +204,19 @@ transfers_by_hop={
 ## What HBM traffic does *not* include
 
 - Bytes logically “in HBM” at rest (pool occupancy without a hop)
-- Traffic to LtRAM/StRAM (separate tiers)
+- Traffic to LtRAM/StRAM (separate tiers) — see **`cross_domain_traffic_bytes`**
 - Refresh (energy only)
 - Evicted SBUF lines (no writeback modeled)
-- Off-chip traffic beyond what trace access events charge
+- Off-chip-to-off-chip hops (e.g. `hbm → ltram`) — neither side is on-chip
+
+### Cross-domain traffic (`cross_domain_traffic_bytes`)
+
+Counts bytes on hops that cross the **on_chip ↔ off_chip** boundary (from hierarchy YAML `interconnect.level_domain`):
+
+- **Read:** hop starts at an off-chip level (`hbm → sbuf`, `ltram → sbuf`, …)
+- **Write:** hop ends at an off-chip level (`sbuf → hbm`, `sbuf → ltram`, …)
+
+Includes all HBM interface traffic plus LtRAM↔on-chip DMA. Excludes pure on-chip hops (`stram` local read) and off-chip-only hops.
 
 ---
 

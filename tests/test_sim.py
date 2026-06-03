@@ -52,6 +52,22 @@ def test_diff_mem_reduces_hbm_traffic(trace: Trace) -> None:
     assert candidate.hbm_traffic_bytes < baseline.hbm_traffic_bytes
 
 
+def test_cross_domain_traffic_includes_ltram_hops(trace: Trace) -> None:
+    baseline_h = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1
+    )
+    diff_h = load_hierarchy(
+        ROOT / "configs/hierarchy/trainium2_diff_mem_25hbm.yaml", num_cores=1
+    )
+    baseline_p = load_policy(ROOT / "configs/policies/baseline_hbm.yaml")
+    diff_p = load_policy(ROOT / "configs/policies/decode_ltram_only.yaml")
+
+    baseline = run_simulation(trace, baseline_h, baseline_p)
+    candidate = run_simulation(trace, diff_h, diff_p)
+    assert candidate.cross_domain_traffic_bytes > candidate.hbm_traffic_bytes
+    assert baseline.cross_domain_traffic_bytes == baseline.hbm_traffic_bytes
+
+
 def test_kernel_wipe_forces_reload(trace: Trace) -> None:
     hierarchy = load_hierarchy(
         ROOT / "configs/hierarchy/trainium2_baseline.yaml", num_cores=1

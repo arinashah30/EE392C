@@ -18,6 +18,9 @@ def format_report(result: SimulationResult) -> str:
         f"hbm_read_bytes: {result.hbm_read_bytes:,}",
         f"hbm_write_bytes: {result.hbm_write_bytes:,}",
         f"hbm_traffic_bytes: {result.hbm_traffic_bytes:,}",
+        f"cross_domain_read_bytes: {result.cross_domain_read_bytes:,}",
+        f"cross_domain_write_bytes: {result.cross_domain_write_bytes:,}",
+        f"cross_domain_traffic_bytes: {result.cross_domain_traffic_bytes:,}",
         f"kernel_wipes: {result.kernel_wipes}",
         "",
         "transfers_by_hop:",
@@ -62,6 +65,14 @@ def compare_results(
             "baseline": baseline.hbm_traffic_bytes,
             "candidate": candidate.hbm_traffic_bytes,
             "pct_change": delta(baseline.hbm_traffic_bytes, candidate.hbm_traffic_bytes),
+        },
+        "cross_domain_traffic_bytes": {
+            "baseline": baseline.cross_domain_traffic_bytes,
+            "candidate": candidate.cross_domain_traffic_bytes,
+            "pct_change": delta(
+                baseline.cross_domain_traffic_bytes,
+                candidate.cross_domain_traffic_bytes,
+            ),
         },
     }
 
