@@ -87,7 +87,7 @@ dmsim ingest \
   --model-key 124050204400345 \
   --output data/traces/ingested_all_cores.json
 
-# Full pipeline: ingest all cores → baseline vs StRAM/LtRAM (constant area)
+# Full pipeline: ingest all cores → baseline vs StRAM/LtRAM (iso-area budget)
 dmsim pipeline \
   --profile-dir data/traces/neuron_profile_json_4-19 \
   --model-key 124050204400345 \
@@ -96,9 +96,17 @@ dmsim pipeline \
   --output data/traces/sim_results_all_cores.json
 ```
 
-**Constant-area tradeoffs** (`trainium2_diff_mem.yaml`): **StRAM is per NeuronCore** — each core's StRAM area is subtracted from that core's SBUF (not split across the chip). LtRAM remains per-chip and trades against HBM. Densities come from `configs/tech_specs/`.
+**Iso-area tradeoffs** (`trainium2_diff_mem.yaml`): fixed SBUF/HBM die area; StRAM/LtRAM capacities from `capacity = area × cell_density / 8`. **StRAM is per NeuronCore** (each core trades against its own SBUF area). **LtRAM is per chip** (trades against HBM area). See `[docs/AREA_BUDGET.md](docs/AREA_BUDGET.md)`.
 
 Details: [docs/NEURON_PROFILE.md](docs/NEURON_PROFILE.md).
+
+After ingest, quick **matplotlib** charts (tensor counts / bytes by category, top tensors by size):
+
+```bash
+pip install matplotlib
+python profiler/visualize_trace.py data/traces/llama32_1b_decode_4core.json
+# PNGs under profiler/out/llama32_1b_decode_4core_viz/
+```
 
 ## Trace format
 
@@ -121,7 +129,7 @@ Categories: `weight`, `kv_cache`, `hidden`, `activation`, `other` (auto-classifi
 ## Model behavior
 
 - **Sequential analytical time**: event latencies sum on a single timeline (no compute/memory overlap yet).
-- **Retention (StRAM)**: if a tensor’s home is StRAM and `t - last_access > retention_s`, the next access is treated as **corrupt** and reloaded from HBM through the hierarchy (counts `corrupt_accesses` + extra traffic).
+- **Refresh (StRAM/HBM)**: background refresh energy is charged between trace events at `refresh_interval_s` (tech default or per-level override). The simulator assumes refresh is frequent enough that StRAM data does not expire.
 - **Kernel boundaries**: `kernel_end` wipes PSUM/SBUF fast buffers and resets residency so the next access reloads from home.
 
 ## Project layout

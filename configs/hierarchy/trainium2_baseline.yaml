@@ -2,37 +2,41 @@ name: trainium2_baseline
 description: Trainium2 per-chip baseline (PSUM + SBUF + HBM only)
 instance: configs/instances/trn2_3xlarge.yaml
 
-# On-chip link bandwidths (analytical model); tune as needed
-links_GBs:
-  psum_sbuf: 2048
-  sbuf_stram: 800
-  stram_ltram: 600
-  ltram_hbm: 2900
+# Bandwidth values are per NeuronCore (parallel across cores in the simulator).
+interconnect:
+  dma_bandwidth_GBs: 368
+  on_chip_bandwidth_GBs: 10000
+  level_domain:
+    psum: on_chip
+    sbuf: on_chip
+    stram: on_chip
+    ltram: off_chip
+    hbm: off_chip
 
 levels:
   - id: psum
     enabled: true
     tech: psum_trainium2
     scope: per_core
-    capacity_bytes: 2097152
+    capacity_bytes: 2097152 # 2 MiB
 
   - id: sbuf
     enabled: true
-    tech: sbuf_trainium2
+    tech: tsmc_n22_sram
     scope: per_core
-    capacity_bytes: 29360128
+    capacity_bytes: 29360128 # 28 MiB
 
   - id: stram
     enabled: false
     tech: edram_1t1c
     scope: per_core
-    capacity_bytes: 33554432
+    capacity_bytes: 0
 
   - id: ltram
     enabled: false
     tech: rram
     scope: per_chip
-    capacity_bytes: 1073741824
+    capacity_bytes: 0
 
   - id: hbm
     enabled: true

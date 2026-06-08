@@ -10,19 +10,28 @@ def format_report(result: SimulationResult) -> str:
     lines = [
         f"=== {result.hierarchy_name} / {result.policy_name} ===",
         f"workload: {result.trace_workload}",
-        f"total_time_ns: {result.total_time_ns:,.0f}",
+        f"total_time_ns: {result.total_time_ns:,.0f}  (worst core"
+        + (f" nc{result.worst_core_id}" if result.worst_core_id is not None else "")
+        + ")",
         f"total_energy_pJ: {result.total_energy_pJ:,.0f}",
+        f"refresh_energy_pJ: {result.refresh_energy_pJ:,.0f}",
         f"hbm_read_bytes: {result.hbm_read_bytes:,}",
         f"hbm_write_bytes: {result.hbm_write_bytes:,}",
         f"hbm_traffic_bytes: {result.hbm_traffic_bytes:,}",
-        f"retention_evictions: {result.retention_evictions}",
-        f"corrupt_accesses: {result.corrupt_accesses}",
+        f"cross_domain_read_bytes: {result.cross_domain_read_bytes:,}",
+        f"cross_domain_write_bytes: {result.cross_domain_write_bytes:,}",
+        f"cross_domain_traffic_bytes: {result.cross_domain_traffic_bytes:,}",
         f"kernel_wipes: {result.kernel_wipes}",
         "",
         "transfers_by_hop:",
     ]
     for hop, count in sorted(result.transfers_by_hop.items()):
         lines.append(f"  {hop}: {count}")
+    if result.time_by_core_ns:
+        lines.append("")
+        lines.append("time_by_core_ns:")
+        for core_id in sorted(result.time_by_core_ns):
+            lines.append(f"  nc{core_id}: {result.time_by_core_ns[core_id]:,.0f}")
     lines.append("")
     lines.append("energy_by_level_pJ:")
     for level_id, energy in sorted(result.energy_by_level_pJ.items()):
@@ -57,9 +66,13 @@ def compare_results(
             "candidate": candidate.hbm_traffic_bytes,
             "pct_change": delta(baseline.hbm_traffic_bytes, candidate.hbm_traffic_bytes),
         },
-        "corrupt_accesses": {
-            "baseline": baseline.corrupt_accesses,
-            "candidate": candidate.corrupt_accesses,
+        "cross_domain_traffic_bytes": {
+            "baseline": baseline.cross_domain_traffic_bytes,
+            "candidate": candidate.cross_domain_traffic_bytes,
+            "pct_change": delta(
+                baseline.cross_domain_traffic_bytes,
+                candidate.cross_domain_traffic_bytes,
+            ),
         },
     }
 

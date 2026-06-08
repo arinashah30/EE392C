@@ -8,11 +8,25 @@ from dmsim.config.area_budget import apply_area_budget
 from dmsim.config.models import (
     HierarchyConfig,
     InstanceSpec,
+    InterconnectConfig,
+    InterconnectDomain,
+    LevelConfig,
     PolicyConfig,
     ResolvedHierarchy,
     ResolvedLevel,
     TechnologySpec,
 )
+
+
+def _resolve_interconnect(
+    level_id: str, interconnect: InterconnectConfig
+) -> InterconnectDomain:
+    domain = interconnect.level_domain.get(level_id)
+    if domain is None:
+        raise ValueError(
+            f"level {level_id!r} missing from interconnect.level_domain in hierarchy YAML"
+        )
+    return domain
 
 
 def _repo_root(start: Path | None = None) -> Path:
@@ -48,14 +62,14 @@ def load_policy(path: Path) -> PolicyConfig:
     return PolicyConfig.model_validate(data)
 
 
-def _capacity_set_by_area_budget(config: HierarchyConfig, level_id: str) -> bool:
+def _capacity_from_area_budget(config: HierarchyConfig, level_id: str) -> bool:
     if not config.area_budget.enabled:
         return False
-    budget = config.area_budget
-    if level_id == "stram" and budget.stram_replaces_sbuf_fraction is not None:
-        return True
-    if level_id == "ltram" and budget.ltram_replaces_hbm_fraction is not None:
-        return True
+    enabled_ids = {level.id for level in config.levels if level.enabled}
+    if level_id == "stram":
+        return "stram" in enabled_ids and "sbuf" in enabled_ids
+    if level_id == "ltram":
+        return "ltram" in enabled_ids and "hbm" in enabled_ids
     return False
 
 
@@ -72,6 +86,8 @@ def load_hierarchy(
     with path.open() as handle:
         raw = yaml.safe_load(handle)
     config = HierarchyConfig.model_validate(raw)
+    for level in config.levels:
+        _resolve_interconnect(level.id, config.interconnect)
 
     instance_path = (
         _resolve_path(root, config.instance)
@@ -92,7 +108,9 @@ def load_hierarchy(
                     tech=load_tech_spec(tech_root / f"{level.tech}.yaml"),
                     scope=level.scope,
                     capacity_bytes=level.capacity_bytes or 0,
+                    interconnect=_resolve_interconnect(level.id, config.interconnect),
                     enabled=False,
+                    refresh_interval_s=level.refresh_interval_s,
                 )
             )
             continue
@@ -104,7 +122,7 @@ def load_hierarchy(
 
         if capacity is None:
             raise ValueError(f"level {level.id} requires capacity_bytes or HBM instance spec")
-        if capacity <= 0 and not _capacity_set_by_area_budget(config, level.id):
+        if capacity <= 0 and not _capacity_from_area_budget(config, level.id):
             raise ValueError(f"level {level.id} requires capacity_bytes or HBM instance spec")
 
         resolved.append(
@@ -114,7 +132,9 @@ def load_hierarchy(
                 tech=tech,
                 scope=level.scope,
                 capacity_bytes=capacity,
+                interconnect=_resolve_interconnect(level.id, config.interconnect),
                 enabled=True,
+                refresh_interval_s=level.refresh_interval_s,
             )
         )
         enabled_index += 1
@@ -125,9 +145,10 @@ def load_hierarchy(
         name=config.name,
         instance=instance,
         levels=resolved,
-        links_GBs=config.links_GBs,
+        interconnect=config.interconnect,
         kernel=config.kernel,
         area_budget=config.area_budget,
+        num_cores=cores,
         tech_dir=tech_root,
         repo_root=root,
     )

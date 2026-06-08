@@ -3,3 +3,7 @@ name: trn2.3xlarge
 num_chips: 1
 cores_per_chip: 8
 hbm_gib_per_chip: 96
+# Trainium2 NeuronCore DMA: 16 engines × 23 B/ns ≈ 368 GB/s aggregate
+dma_bytes_per_ns_per_engine: 23
+dma_engines_per_neuron_core: 16
+dma_cap_transfer_bandwidth: true

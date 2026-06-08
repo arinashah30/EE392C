@@ -1,0 +1,18 @@
+name: decode_ltram_only
+description: LLM decode placement — weights in LtRAM; everything else in HBM
+home_level_by_category:
+  weight: ltram
+  kv_cache: hbm
+  hidden: hbm
+  activation: hbm
+  other: hbm
+
+default_access_target: sbuf
+
+fallback_by_level:
+  psum: sbuf
+  sbuf: hbm
+  stram: hbm
+  ltram: hbm
+
+spill_victim_order: best_case

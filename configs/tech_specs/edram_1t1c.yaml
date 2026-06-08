@@ -5,22 +5,22 @@ class: edram
 volatile: true
 # Retention: 40–110 µs (requires refresh; IBM 45 nm up to 110 µs @ 99.9% yield)
 # Conservative 40 µs for retention/eviction modeling
-retention_s: 0.00004
+retention_s: 0.00009
+# All rows refreshed within retention window (~40 µs class eDRAM).
+refresh_interval_s: 0.00009
+refresh_energy_pJ_per_bit: 0.5
 
 # 11 Mbit/mm² → 11 bits/µm² (IBM 32 nm, cell area 0.039 µm²); ~4.5× vs 6T SRAM
-cell_density_bits_per_um2: 11.0
+cell_density_bits_per_um2: 34.5
 
 access:
   # Read: 1.5–2.0 ns | Write: 1.7–2.0 ns (destructive read + write-back ~+30%)
-  read_latency_ns: 1.75
-  write_latency_ns: 1.85
-  read_energy_pJ_per_bit: 1.0
-  write_energy_pJ_per_bit: 1.5
-
-interface:
-  line_size_bytes: 64
-  max_bandwidth_GBs: 400
+  read_latency_ns: 1.5
+  write_latency_ns: 1.5
+  read_energy_pJ_per_bit: 0.5
+  write_energy_pJ_per_bit: 0.5
 
 notes:
   relative_cost: moderate-high
   description: trench/stacked capacitor; dedicated capacitor process
+  bandwidth_source: "128 GB/s aggregate (Haswell 22 nm; IBM POWER8 L3 macro ports)"

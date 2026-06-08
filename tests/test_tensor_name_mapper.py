@@ -35,7 +35,7 @@ def test_catalog_resolves_input_and_dma_weight_route() -> None:
     }
     catalog = NeffTensorCatalog(device)
     entry = catalog.by_variable["input3"]
-    assert entry.semantic_name == "layer_0.cache_k"
+    assert entry.semantic_name == "input3_kv_cache"
     assert entry.category == TensorCategory.KV_CACHE
 
     weight_dma = catalog.resolve_dma("transpose.99_sg0000", 524288, src="WEIGHT", dst="SB")

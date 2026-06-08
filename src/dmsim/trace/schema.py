@@ -87,7 +87,6 @@ class Trace(BaseModel):
     def tensor_map(self) -> dict[str, TensorRecord]:
         return {tensor.id: tensor for tensor in self.tensors}
 
-
 def load_trace(path: Path) -> Trace:
     with path.open() as handle:
         data = json.load(handle)

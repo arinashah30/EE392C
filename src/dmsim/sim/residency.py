@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 class TensorResidency:
     home_level: str
     resident_level: str | None = None
-    last_home_touch_ns: float | None = None
-    corrupt: bool = False
 
 
 @dataclass

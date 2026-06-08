@@ -73,3 +73,134 @@ def test_ingest_classifies_weights_and_kv() -> None:
     assert cats[TensorCategory.KV_CACHE] > 20
     assert any("cache_k" in tensor.name for tensor in trace.tensors)
     assert any("attention.wq" in tensor.name for tensor in trace.tensors)
+
+
+def test_ingest_unattributed_dynamic_dma() -> None:
+    """Decode-style profiles leave source/dest unknown on software_dynamic HBM DMA."""
+    device = {
+        "neff_node": [
+            {"variable_name": "input100", "shape": "[128 16 2 64]", "size": "524288", "type": "IN"},
+            {"variable_name": "input180", "shape": "[32064 2048]", "size": "65536000", "type": "IN"},
+        ],
+        "dma": [
+            {
+                "variable": "unknown",
+                "transfer_size": 8192,
+                "source": [["unknown"]],
+                "dest": ["unknown"],
+                "queue_type": "software_dynamic",
+                "timestamp": 1000,
+            },
+            {
+                "variable": "unknown",
+                "transfer_size": 8192,
+                "source": [["unknown"]],
+                "dest": ["unknown"],
+                "queue_type": "software_dynamic",
+                "timestamp": 2000,
+            },
+            {
+                "variable": "input1",
+                "transfer_size": 1024,
+                "source": [["INPUT"]],
+                "dest": ["SB"],
+                "queue_type": "input",
+                "timestamp": 3000,
+            },
+        ],
+        "layer_summary": [],
+    }
+    import json
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_dir = Path(tmp)
+        (profile_dir / "profile.json").write_text(
+            json.dumps(
+                {
+                    "system_profile_metadata": [{"first_ts_ns": 0, "last_ts_ns": 1}],
+                    "device_profile_list": [
+                        {
+                            "nc_id": 0,
+                            "device_profile_name": "device_nc0",
+                        }
+                    ],
+                }
+            )
+        )
+        (profile_dir / "device_nc0.json").write_text(json.dumps(device))
+
+        trace = ingest_neuron_json_profile(
+            profile_dir,
+            options=IngestOptions(
+                neuron_core_id=0,
+                min_transfer_bytes=64,
+                aggregate_dma=True,
+                kernel_from_layers=False,
+                max_access_events=None,
+            ),
+        )
+
+    access_events = [event for event in trace.events if event.get("type") == "access"]
+    assert len(access_events) >= 2
+    cats = {tensor.id: tensor.category for tensor in trace.tensors}
+    access_cats = Counter(cats[event["tensor_id"]] for event in access_events)
+    assert access_cats[TensorCategory.WEIGHT] > 0 or access_cats[TensorCategory.OTHER] > 0
+    assert any(event["tensor_id"].startswith("hbm_traffic_") for event in access_events)
+
+
+def test_ingest_skip_unattributed_dma() -> None:
+    """Unknown dynamic DMA can be omitted instead of synthetic hbm_traffic_*."""
+    device = {
+        "neff_node": [
+            {"variable_name": "input180", "shape": "[32064 2048]", "size": "65536000", "type": "IN"},
+        ],
+        "dma": [
+            {
+                "variable": "unknown",
+                "transfer_size": 8192,
+                "source": [["unknown"]],
+                "dest": ["unknown"],
+                "queue_type": "software_dynamic",
+                "timestamp": 1000,
+            },
+            {
+                "variable": "input1",
+                "transfer_size": 1024,
+                "source": [["INPUT"]],
+                "dest": ["SB"],
+                "queue_type": "input",
+                "timestamp": 3000,
+            },
+        ],
+        "layer_summary": [],
+    }
+    import json
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_dir = Path(tmp)
+        (profile_dir / "profile.json").write_text(
+            json.dumps(
+                {
+                    "system_profile_metadata": [{"first_ts_ns": 0, "last_ts_ns": 1}],
+                    "device_profile_list": [{"nc_id": 0, "device_profile_name": "device_nc0"}],
+                }
+            )
+        )
+        (profile_dir / "device_nc0.json").write_text(json.dumps(device))
+
+        trace = ingest_neuron_json_profile(
+            profile_dir,
+            options=IngestOptions(
+                neuron_core_id=0,
+                kernel_from_layers=False,
+                skip_unattributed_dma=True,
+            ),
+        )
+
+    access_events = [event for event in trace.events if event.get("type") == "access"]
+    assert not any(event["tensor_id"].startswith("hbm_traffic_") for event in access_events)
+    assert len(access_events) == 1

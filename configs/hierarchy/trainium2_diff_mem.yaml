@@ -2,11 +2,15 @@ name: trainium2_diff_mem
 description: PSUM -> SBUF -> StRAM (per core) -> LtRAM -> HBM
 instance: configs/instances/trn2_3xlarge.yaml
 
-links_GBs:
-  psum_sbuf: 2048
-  sbuf_stram: 800
-  stram_ltram: 600
-  ltram_hbm: 2900
+interconnect:
+  dma_bandwidth_GBs: 368
+  on_chip_bandwidth_GBs: 10000
+  level_domain:
+    psum: on_chip
+    sbuf: on_chip
+    stram: on_chip
+    ltram: off_chip
+    hbm: off_chip
 
 levels:
   - id: psum
@@ -25,14 +29,13 @@ levels:
     enabled: true
     tech: edram_1t1c
     scope: per_core
-    # ~128 MiB per chip / 4 active cores in profile (tune with area_budget)
-    capacity_bytes: 33554432
+    capacity_bytes: 0
 
   - id: ltram
     enabled: true
     tech: rram
     scope: per_chip
-    capacity_bytes: 1073741824
+    capacity_bytes: 0
 
   - id: hbm
     enabled: true
@@ -40,9 +43,14 @@ levels:
     scope: per_chip
 
 kernel:
+  # Scratch only — StRAM/LtRAM/HBM homes persist across kernels unless added here.
   wipe_levels_on_boundary: [psum, sbuf]
 
 area_budget:
   enabled: true
   nominal_sbuf_bytes_per_core: 29360128
   nominal_hbm_gib_per_chip: 96
+  # ~32 MiB StRAM/core (matches prior fixed-capacity floorplan trade)
+  stram_replaces_sbuf_fraction: 0.253506
+  # ~1 GiB LtRAM at RRAM density (small HBM area trade)
+  ltram_replaces_hbm_fraction: 0.0000572917
