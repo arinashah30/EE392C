@@ -32,9 +32,24 @@ M4_PRESENTATION_LABELS = [
     "Capacity 25/50",
 ]
 
+# M2/M3 area-replacement % when comparing cell technologies on the cross-milestone chart
+# (same fraction for every tech at that milestone; not the per-model “best” sweep point).
+CROSS_MILESTONE_SWEEP_PCT = 50
+
+CROSS_MILESTONE_M2_TECHS = [
+    ("1T1C eDRAM", "consolidated_stram_edram_1t1c.json"),
+    ("3T eDRAM", "consolidated_stram_edram_3t.json"),
+]
+CROSS_MILESTONE_M3_TECHS = [
+    ("RRAM", "consolidated_ltram_rram.json"),
+    ("FeRAM", "consolidated_ltram_feram.json"),
+]
+
 LLAMA_COLOR = "#2563eb"
 QWEN_COLOR = "#dc2626"
 TECH_COLORS = {"1t1c": "#059669", "3t": "#7c3aed", "rram": "#0891b2", "feram": "#ea580c"}
+M4_CONFIG_COLORS = ["#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa"]
+MILESTONE_BAND_COLORS = ("#eef2ff", "#ecfdf5", "#fff7ed")
 
 HBM_REDUCTION_YLABEL = "HBM traffic reduction from baseline (%)"
 LATENCY_IMPROVEMENT_YLABEL = "Latency improvement from baseline (%)"
@@ -160,6 +175,9 @@ def _grouped_bars(
     annotate: bool = True,
     show_legend: bool = True,
     xtick_rotation: float = 0,
+    ylim: tuple[float, float] | None = None,
+    legend_loc: str = "upper left",
+    legend_bbox_to_anchor: tuple[float, float] | None = None,
 ) -> None:
     x = np.arange(len(labels))
     width = 0.36
@@ -174,7 +192,10 @@ def _grouped_bars(
     reduction = not signed
     _style_axes(ax, ylabel=ylabel, title=title, reduction=reduction, signed=signed)
     if show_legend:
-        ax.legend(frameon=False, fontsize=8, loc="upper left")
+        legend_kw: dict = {"frameon": False, "fontsize": 8, "loc": legend_loc}
+        if legend_bbox_to_anchor is not None:
+            legend_kw["bbox_to_anchor"] = legend_bbox_to_anchor
+        ax.legend(**legend_kw)
     if annotate:
         ax.relim()
         ax.autoscale()
@@ -201,6 +222,8 @@ def _grouped_bars(
             ax.set_ylim(ymin - span * 0.08, ymax + span * 0.12)
         else:
             ax.set_ylim(0, ymax + span * 0.15)
+    if ylim is not None:
+        ax.set_ylim(ylim)
 
 
 def _sweep_row(
@@ -584,6 +607,75 @@ def plot_m3_ltram_tech_compare() -> Path:
     return out
 
 
+def plot_m4_best_case_energy() -> Path:
+    """M4 best_case: energy improvement vs baseline, grouped by hierarchy config."""
+    llama_vals = [
+        load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["energy_reduction_pct"]
+        for slug, _ in M4_CONFIGS
+    ]
+    qwen_vals = [
+        load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["energy_reduction_pct"]
+        for slug, _ in M4_CONFIGS
+    ]
+    labels = [slug for slug, _ in M4_CONFIGS]
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    _grouped_bars(
+        ax,
+        labels,
+        llama_vals,
+        qwen_vals,
+        ylabel=ENERGY_REDUCTION_YLABEL,
+        title="M4 — Best-case energy vs baseline (`decode_tiered`, best_case spill)",
+        signed=True,
+        xtick_rotation=18,
+        legend_loc="lower right",
+    )
+    ax.text(
+        0.02,
+        0.02,
+        ENERGY_NOTE,
+        transform=ax.transAxes,
+        fontsize=8,
+        color="0.35",
+        va="bottom",
+    )
+    fig.tight_layout()
+    out = OUT_DIR / "m4_best_case_energy_improvement.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_m4_best_case_latency() -> Path:
+    """M4 best_case: latency improvement vs baseline, grouped by hierarchy config."""
+    llama_vals = [
+        load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["latency_improvement_pct"]
+        for slug, _ in M4_CONFIGS
+    ]
+    qwen_vals = [
+        load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["latency_improvement_pct"]
+        for slug, _ in M4_CONFIGS
+    ]
+    labels = [slug for slug, _ in M4_CONFIGS]
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    _grouped_bars(
+        ax,
+        labels,
+        llama_vals,
+        qwen_vals,
+        ylabel=LATENCY_IMPROVEMENT_YLABEL,
+        title="M4 — Best-case latency vs baseline (`decode_tiered`, best_case spill)",
+        signed=False,
+        xtick_rotation=18,
+        ylim=(0, 100),
+    )
+    fig.tight_layout()
+    out = OUT_DIR / "m4_best_case_latency_improvement.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 def plot_m4_hierarchy() -> Path:
     llama_vals = []
     qwen_vals = []
@@ -657,45 +749,191 @@ def plot_m4_ltram_fills() -> Path:
     return out
 
 
+def _cross_milestone_hbm_groups() -> list[tuple[str, list[tuple[str, float, float]]]]:
+    """(milestone title, [(tech label, llama %, qwen %), ...]) per milestone."""
+
+    def sweep_pair(fname: str) -> tuple[float, float]:
+        llama = load_sweep(LLAMA_SWEEP / fname)[CROSS_MILESTONE_SWEEP_PCT]["hbm_reduction_pct"]
+        qwen = load_sweep(QWEN_SWEEP / fname)[CROSS_MILESTONE_SWEEP_PCT]["hbm_reduction_pct"]
+        return llama, qwen
+
+    m2 = [
+        (label, *sweep_pair(fname))
+        for label, fname in CROSS_MILESTONE_M2_TECHS
+    ]
+    m3 = [
+        (label, *sweep_pair(fname))
+        for label, fname in CROSS_MILESTONE_M3_TECHS
+    ]
+    m4 = [
+        (
+            m4_label,
+            load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["hbm_reduction_pct"],
+            load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["hbm_reduction_pct"],
+        )
+        for slug, m4_label in zip([s for s, _ in M4_CONFIGS], M4_PRESENTATION_LABELS)
+    ]
+    return [
+        ("M2 StRAM", m2),
+        ("M3 LtRAM", m3),
+        ("M4 Full hierarchy", m4),
+    ]
+
+
+def _tech_color_for_label(label: str, tech_idx: int) -> str:
+    lower = label.lower()
+    if "1t1c" in lower:
+        return TECH_COLORS["1t1c"]
+    if "3t" in lower:
+        return TECH_COLORS["3t"]
+    if "feram" in lower:
+        return TECH_COLORS["feram"]
+    if "rram" in lower:
+        return TECH_COLORS["rram"]
+    return M4_CONFIG_COLORS[tech_idx % len(M4_CONFIG_COLORS)]
+
+
+def _short_tech_label(label: str) -> str:
+    """Legend-friendly short names."""
+    mapping = {
+        "1T1C eDRAM": "1T1C",
+        "3T eDRAM": "3T",
+        "RRAM": "RRAM",
+        "FeRAM": "FeRAM",
+    }
+    if label in mapping:
+        return mapping[label]
+    return label.replace("Primary ", "P ").replace("Balanced ", "B ").replace("Near-core ", "N ").replace(
+        "Capacity ", "C "
+    )
+
+
+def _plot_cross_milestone_grouped_bars(
+    ax,
+    groups: list[tuple[str, list[tuple[str, float, float]]]],
+    *,
+    ylabel: str,
+    title: str,
+) -> None:
+    """Compact milestone groups; Llama block left, Qwen block right; tech = color."""
+    bar_w = 0.42
+    tech_step = bar_w + 0.06
+    milestone_gap = 0.35
+
+    milestone_centers: list[float] = []
+    milestone_labels: list[str] = []
+    tech_legend: dict[str, str] = {}
+    x = 0.0
+    annotate_threshold = 8.0
+
+    def _draw_bar(bx: float, val: float, color: str, *, hatched: bool) -> None:
+        ax.bar(
+            bx,
+            val,
+            bar_w,
+            color=color,
+            edgecolor="0.2",
+            linewidth=0.6,
+            hatch="///" if hatched else None,
+            zorder=3 if hatched else 2,
+        )
+        if val >= annotate_threshold:
+            ax.text(
+                bx,
+                val + 0.5,
+                _format_bar_label(val),
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                color="0.15",
+            )
+
+    for group_idx, (milestone, configs) in enumerate(groups):
+        group_start = x - bar_w / 2
+        n = len(configs)
+        # Same center-to-center spacing as between tech bars within a model.
+        qwen_start = x + n * tech_step
+
+        for tech_idx, (tech_label, llama_val, qwen_val) in enumerate(configs):
+            color = _tech_color_for_label(tech_label, tech_idx)
+            tech_legend[_short_tech_label(tech_label)] = color
+            _draw_bar(x + tech_idx * tech_step, llama_val, color, hatched=False)
+            _draw_bar(qwen_start + tech_idx * tech_step, qwen_val, color, hatched=True)
+
+        group_end = qwen_start + (n - 1) * tech_step + bar_w if n else x
+        milestone_centers.append((group_start + group_end) / 2)
+        milestone_labels.append(milestone.replace(" Full hierarchy", ""))
+
+        ax.axvspan(
+            group_start,
+            group_end + bar_w / 2,
+            facecolor=MILESTONE_BAND_COLORS[group_idx % len(MILESTONE_BAND_COLORS)],
+            alpha=0.55,
+            zorder=0,
+        )
+        x = group_end + milestone_gap
+
+    ax.set_xticks(milestone_centers)
+    ax.set_xticklabels(milestone_labels, fontsize=10, fontweight="bold")
+    ax.set_xlim(-0.35, x - milestone_gap + 0.35)
+    _style_axes(ax, ylabel=ylabel, title=title, reduction=True)
+
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(0, ymax + (ymax - ymin) * 0.08)
+
+    tech_handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor=c, edgecolor="0.2", linewidth=0.6)
+        for short, c in tech_legend.items()
+    ]
+    model_handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor="0.55", edgecolor="0.2", linewidth=0.6),
+        plt.Rectangle((0, 0), 1, 1, facecolor="0.55", edgecolor="0.2", linewidth=0.6, hatch="///"),
+    ]
+    leg1 = ax.legend(
+        tech_handles,
+        list(tech_legend.keys()),
+        title="Technology / config",
+        frameon=False,
+        fontsize=8,
+        title_fontsize=8,
+        loc="upper left",
+        ncol=2,
+    )
+    ax.add_artist(leg1)
+    ax.legend(
+        model_handles,
+        ["Llama 3.2-1B (solid)", "Qwen1.5-MoE (hatched)"],
+        title="Model",
+        frameon=False,
+        fontsize=8,
+        title_fontsize=8,
+        loc="upper right",
+    )
+
+
 def plot_cross_milestone_headlines() -> Path:
-    """Synthesis: best HBM reduction per milestone per model."""
-    llama_m2 = load_sweep(LLAMA_SWEEP / "consolidated_stram_edram_1t1c.json")[50]["hbm_reduction_pct"]
-    llama_m3 = load_sweep(LLAMA_SWEEP / "consolidated_ltram_rram.json")[25]["hbm_reduction_pct"]
-    llama_m4 = max(
-        load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["hbm_reduction_pct"]
-        for slug, _ in M4_CONFIGS
-    )
+    """Cross-milestone HBM reduction grouped by milestone and technology."""
+    groups = _cross_milestone_hbm_groups()
 
-    qwen_m2 = load_sweep(QWEN_SWEEP / "consolidated_stram_edram_1t1c.json")[75]["hbm_reduction_pct"]
-    qwen_m3 = load_sweep(QWEN_SWEEP / "consolidated_ltram_rram.json")[75]["hbm_reduction_pct"]
-    qwen_m4 = max(
-        load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["hbm_reduction_pct"]
-        for slug, _ in M4_CONFIGS
-    )
-
-    milestones = ["M2 StRAM", "M3 LtRAM", "M4 Full"]
-    llama = [llama_m2, llama_m3, llama_m4]
-    qwen = [qwen_m2, qwen_m3, qwen_m4]
-
-    x = np.arange(len(milestones))
-    width = 0.36
-    fig, ax = plt.subplots(figsize=(7.5, 4.5))
-    ax.bar(x - width / 2, llama, width, label="Llama", color=LLAMA_COLOR)
-    ax.bar(x + width / 2, qwen, width, label="Qwen", color=QWEN_COLOR)
-    ax.set_xticks(x)
-    ax.set_xticklabels(milestones)
-    _style_axes(
+    fig, ax = plt.subplots(figsize=(10.5, 4.8))
+    _plot_cross_milestone_grouped_bars(
         ax,
+        groups,
         ylabel=HBM_REDUCTION_YLABEL,
-        title="Cross-milestone headline (best_case)",
-        reduction=True,
+        title=(
+            "Cross-milestone HBM traffic reduction by configuration "
+            f"(M2/M3 @ {CROSS_MILESTONE_SWEEP_PCT}% area; M4 tiered, best_case spill)"
+        ),
     )
-    ax.legend(frameon=False, loc="upper left")
-    fig.tight_layout()
-    out = OUT_DIR / "cross_milestone_best_hbm_reduction.png"
-    fig.savefig(out, dpi=180, bbox_inches="tight")
+    fig.subplots_adjust(bottom=0.14, top=0.88, left=0.08, right=0.98)
+    for name in (
+        "cross_milestone_hbm_reduction_by_config.png",
+        "cross_milestone_best_hbm_reduction.png",
+    ):
+        out = OUT_DIR / name
+        fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
-    return out
+    return OUT_DIR / "cross_milestone_hbm_reduction_by_config.png"
 
 
 def main() -> None:
@@ -713,6 +951,8 @@ def main() -> None:
         plot_m3_ltram_model_compare(),
         plot_m3_ltram_tech_compare(),
         plot_m4_hierarchy(),
+        plot_m4_best_case_energy(),
+        plot_m4_best_case_latency(),
         plot_m4_ltram_fills(),
         plot_cross_milestone_headlines(),
     ]
