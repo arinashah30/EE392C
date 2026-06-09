@@ -47,6 +47,18 @@ CROSS_MILESTONE_M3_TECHS = [
 
 LLAMA_COLOR = "#2563eb"
 QWEN_COLOR = "#dc2626"
+# Tech line plots (M2/M3 HBM + energy): matplotlib default blue/orange pair
+TECH_LINE_PRIMARY = "#1f77b4"
+TECH_LINE_SECONDARY = "#ff7f0e"
+STRAM_TECH_LINE_COLORS = {
+    "1T1C eDRAM": TECH_LINE_PRIMARY,
+    "3T eDRAM": TECH_LINE_SECONDARY,
+}
+LTRAM_TECH_LINE_COLORS = {
+    "RRAM": TECH_LINE_PRIMARY,
+    "FeRAM": TECH_LINE_SECONDARY,
+}
+# Bar / cross-milestone tech encoding (distinct per technology)
 TECH_COLORS = {"1t1c": "#059669", "3t": "#7c3aed", "rram": "#0891b2", "feram": "#ea580c"}
 M4_CONFIG_COLORS = ["#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa"]
 MILESTONE_BAND_COLORS = ("#eef2ff", "#ecfdf5", "#fff7ed")
@@ -54,7 +66,8 @@ MILESTONE_BAND_COLORS = ("#eef2ff", "#ecfdf5", "#fff7ed")
 HBM_REDUCTION_YLABEL = "HBM traffic reduction from baseline (%)"
 LATENCY_IMPROVEMENT_YLABEL = "Latency improvement from baseline (%)"
 ENERGY_REDUCTION_YLABEL = "Energy reduction from baseline (%)"
-ENERGY_NOTE = "negative = higher energy (e.g. StRAM refresh)"
+ENERGY_CHANGE_YLABEL = "Energy change from baseline (%)"
+ENERGY_NOTE = "negative = lower energy; positive = higher energy (e.g. StRAM refresh)"
 
 
 def improvement_from_baseline(pct_change: float) -> float:
@@ -139,6 +152,7 @@ def _plot_sweep_lines(
     title: str,
     ylabel: str,
     signed: bool = False,
+    line_colors: dict[str, str] | None = None,
 ) -> None:
     x = np.arange(len(FRACTIONS))
     for label, data in series.items():
@@ -148,6 +162,7 @@ def _plot_sweep_lines(
             marker="o",
             linewidth=2,
             label=label,
+            color=(line_colors or {}).get(label),
         )
     ax.set_xticks(x)
     ax.set_xticklabels([f"{p}%" for p in FRACTIONS])
@@ -401,6 +416,7 @@ def plot_presentation_tech_dashboard() -> Path:
 
     for row_idx, (row_title, path_a, path_b, label_a, label_b, xlabel) in enumerate(rows):
         series = {label_a: load_sweep(path_a), label_b: load_sweep(path_b)}
+        tech_colors = STRAM_TECH_LINE_COLORS if row_idx == 0 else LTRAM_TECH_LINE_COLORS
         for col_idx, (metric, ylabel, signed) in enumerate(panels):
             ax = axes[row_idx, col_idx]
             _plot_sweep_lines(
@@ -411,6 +427,7 @@ def plot_presentation_tech_dashboard() -> Path:
                 title=f"{row_title}",
                 ylabel=ylabel.split("(")[0].strip(),
                 signed=signed,
+                line_colors=tech_colors,
             )
             if signed:
                 ax.text(0.02, 0.02, ENERGY_NOTE, transform=ax.transAxes, fontsize=6, color="0.35")
@@ -555,9 +572,39 @@ def plot_m2_stram_tech_compare() -> Path:
             xlabel="SBUF area → StRAM",
             title=f"M2 — StRAM tech compare ({model})",
             ylabel=HBM_REDUCTION_YLABEL,
+            line_colors=STRAM_TECH_LINE_COLORS,
         )
     fig.tight_layout()
     out = OUT_DIR / "m2_stram_tech_comparison.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_m2_stram_tech_energy() -> Path:
+    """M2: one panel per model; 1T1C + 3T lines vs SBUF area trade."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    for ax, sweep_dir, model in [
+        (axes[0], LLAMA_SWEEP, "Llama 3.2-1B"),
+        (axes[1], QWEN_SWEEP, "Qwen1.5-MoE-A2.7B"),
+    ]:
+        _plot_sweep_lines(
+            ax,
+            {
+                "1T1C eDRAM": load_sweep(sweep_dir / "consolidated_stram_edram_1t1c.json"),
+                "3T eDRAM": load_sweep(sweep_dir / "consolidated_stram_edram_3t.json"),
+            },
+            metric="energy_pct",
+            xlabel="SBUF area → StRAM",
+            title=f"M2 — StRAM tech energy ({model})",
+            ylabel=ENERGY_CHANGE_YLABEL,
+            signed=True,
+            line_colors=STRAM_TECH_LINE_COLORS,
+        )
+    fig.suptitle("M2 — StRAM technology energy vs area replacement", fontsize=12, y=1.02)
+    fig.text(0.5, 0.01, ENERGY_NOTE, ha="center", fontsize=8, color="0.35")
+    fig.tight_layout(rect=(0, 0.04, 1, 0.96))
+    out = OUT_DIR / "m2_stram_tech_energy.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return out
@@ -599,9 +646,39 @@ def plot_m3_ltram_tech_compare() -> Path:
             xlabel="HBM area → LtRAM",
             title=f"M3 — LtRAM tech compare ({model})",
             ylabel=HBM_REDUCTION_YLABEL,
+            line_colors=LTRAM_TECH_LINE_COLORS,
         )
     fig.tight_layout()
     out = OUT_DIR / "m3_ltram_tech_comparison.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_m3_ltram_tech_energy() -> Path:
+    """M3: one panel per model; RRAM + FeRAM lines vs HBM area trade."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    for ax, sweep_dir, model in [
+        (axes[0], LLAMA_SWEEP, "Llama 3.2-1B"),
+        (axes[1], QWEN_SWEEP, "Qwen1.5-MoE-A2.7B"),
+    ]:
+        _plot_sweep_lines(
+            ax,
+            {
+                "RRAM": load_sweep(sweep_dir / "consolidated_ltram_rram.json"),
+                "FeRAM": load_sweep(sweep_dir / "consolidated_ltram_feram.json"),
+            },
+            metric="energy_pct",
+            xlabel="HBM area → LtRAM",
+            title=f"M3 — LtRAM tech energy ({model})",
+            ylabel=ENERGY_CHANGE_YLABEL,
+            signed=True,
+            line_colors=LTRAM_TECH_LINE_COLORS,
+        )
+    fig.suptitle("M3 — LtRAM technology energy vs area replacement", fontsize=12, y=1.02)
+    fig.text(0.5, 0.01, ENERGY_NOTE, ha="center", fontsize=8, color="0.35")
+    fig.tight_layout(rect=(0, 0.04, 1, 0.96))
+    out = OUT_DIR / "m3_ltram_tech_energy.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return out
@@ -703,7 +780,7 @@ def plot_m4_hierarchy() -> Path:
     _style_axes(
         ax,
         ylabel=HBM_REDUCTION_YLABEL,
-        title="M4 — Full hierarchy configs (`decode_tiered`, best_case)",
+        title="M4 — Full hierarchy configs (`decode_tiered`)",
         reduction=True,
     )
     ax.legend(frameon=False, loc="upper right")
@@ -714,6 +791,57 @@ def plot_m4_hierarchy() -> Path:
 
     fig.tight_layout()
     out = OUT_DIR / "m4_hierarchy_hbm_reduction.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_m4_hierarchy_energy() -> Path:
+    """M4: energy change by hierarchy config; Llama/Qwen side-by-side (matches HBM chart)."""
+    llama_vals = []
+    qwen_vals = []
+    labels = []
+
+    for slug, label in M4_CONFIGS:
+        labels.append(label)
+        llama_vals.append(
+            load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["energy_pct"]
+        )
+        qwen_vals.append(
+            load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["energy_pct"]
+        )
+
+    x = np.arange(len(labels))
+    width = 0.36
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.5))
+    ax.bar(x - width / 2, llama_vals, width, label="Llama 3.2-1B", color=LLAMA_COLOR)
+    ax.bar(x + width / 2, qwen_vals, width, label="Qwen1.5-MoE-A2.7B", color=QWEN_COLOR)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_xlabel("Full hierarchy design (StRAM fraction / LtRAM fraction)")
+    _style_axes(
+        ax,
+        ylabel=ENERGY_CHANGE_YLABEL,
+        title="M4 — Full hierarchy configs (`decode_tiered`)",
+        signed=True,
+    )
+    ax.legend(frameon=False, loc="upper right")
+    ax.text(0.02, 0.02, ENERGY_NOTE, transform=ax.transAxes, fontsize=8, color="0.35")
+
+    for i, (lv, qv) in enumerate(zip(llama_vals, qwen_vals)):
+        for offset, val in [(-width / 2, lv), (width / 2, qv)]:
+            va = "bottom" if val >= 0 else "top"
+            dy = 0.8 if val >= 0 else -0.8
+            ax.text(i + offset, val + dy, _format_bar_label(val), ha="center", va=va, fontsize=8)
+
+    ymin, ymax = ax.get_ylim()
+    span = ymax - ymin
+    ax.set_ylim(ymin - span * 0.08, ymax + span * 0.12)
+
+    fig.tight_layout()
+    out = OUT_DIR / "m4_hierarchy_energy.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return out
@@ -948,9 +1076,12 @@ def main() -> None:
         plot_m1_baseline(),
         plot_m2_stram_model_compare(),
         plot_m2_stram_tech_compare(),
+        plot_m2_stram_tech_energy(),
         plot_m3_ltram_model_compare(),
         plot_m3_ltram_tech_compare(),
+        plot_m3_ltram_tech_energy(),
         plot_m4_hierarchy(),
+        plot_m4_hierarchy_energy(),
         plot_m4_best_case_energy(),
         plot_m4_best_case_latency(),
         plot_m4_ltram_fills(),
