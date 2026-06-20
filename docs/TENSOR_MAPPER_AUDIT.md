@@ -1,10 +1,20 @@
 # Tensor Mapper Audit — Llama-3.2-1B-Instruct & Qwen1.5-MoE-A2.7B
 
-Audit of [`src/dmsim/trace/tensor_name_mapper.py`](../src/dmsim/trace/tensor_name_mapper.py) against **compiled NEFF slot shapes** (not raw HuggingFace shapes). Conducted June 2026. Findings come from code review, HF/NxD layout recipes, in-repo model constants, and inline mapper tests.
+Audit of [`src/dmsim/trace/tensor_name_mapper.py`](../src/dmsim/trace/tensor_name_mapper.py) against **compiled NEFF slot shapes** (not raw HuggingFace shapes).
 
-**Related:** [WORKFLOW.md](WORKFLOW.md), [profiler/LLAMA32_PROFILING_AND_DMSIM.md](../profiler/LLAMA32_PROFILING_AND_DMSIM.md), [profiler/NEURON_PROFILE.md](../profiler/NEURON_PROFILE.md), [docs/TODOS.md](TODOS.md).
+| Audit | Date | Scope |
+|-------|------|-------|
+| Initial | June 2026 | Code review + synthetic NEFF; P0 bugs documented |
+| Re-audit | 19 June 2026 | Live decode NEFF JSON on trn2.3xlarge + ingested 4-core traces |
+| **Independent audit (this doc)** | **20 June 2026** | Full re-run: live catalogs (4 cores), fresh 4-core ingest, pytest, DMA/DGE checks |
 
-**Key idea:** `neff_node[]` shapes are the mapper's ground truth. HF / PyTorch graphs are useful for architecture constants and for *deriving* expected NEFF shapes after TP, fusion, and layout transforms — see §2 and §3.
+**Related:** [WORKFLOW.md](dev/WORKFLOW.md), [profiler/LLAMA32_PROFILING_AND_DMSIM.md](../profiler/LLAMA32_PROFILING_AND_DMSIM.md), [profiler/NEURON_PROFILE.md](../profiler/NEURON_PROFILE.md).
+
+**Key idea:** `neff_node[]` shapes are the mapper's ground truth. HF / PyTorch graphs are useful for architecture constants and for *deriving* expected NEFF shapes after TP, fusion, and layout transforms — see §2.
+
+**Verdict (20 June 2026):** Mapper and ingest path are **healthy**. Zero fallback `inputN_norm` names, zero duplicate catalog `tensor_id`s, zero Qwen `other` static tensors. Llama mixed-profile dirs auto-select DGE capture. No open P0–P3 bugs.
+
+**Capture note:** Llama uses **NXDI** tiled decode NEFFs (`912553378486640`). Dense HF-style shapes (e.g. `[2048 512]` wq) do **not** appear on the live Llama decode graph — see §4.1.
 
 ---
 
@@ -13,8 +23,6 @@ Audit of [`src/dmsim/trace/tensor_name_mapper.py`](../src/dmsim/trace/tensor_nam
 Use a tiered approach. **Tier C is what dmsim actually ingests.**
 
 ### Tier A — HuggingFace weight catalog (logical / uncompiled)
-
-Install `transformers`, then enumerate parameters:
 
 ```bash
 pip install transformers torch
@@ -29,288 +37,240 @@ for mid in ['meta-llama/Llama-3.2-1B-Instruct', 'Qwen/Qwen1.5-MoE-A2.7B']:
 "
 ```
 
-This gives **semantic HF names → full (unsharded) shapes**. Do **not** compare these directly to `neff_node[]`; apply TP sharding, fusion, and layout rules in §2 first.
+**Qwen HF config:** 24 layers, H=2048, 16 heads, 16 KV heads, head_dim=128, 60 experts, `moe_intermediate_size`=1408, vocab=151936.
 
-**Qwen HF config** (from `Qwen/Qwen1.5-MoE-A2.7B/config.json`): 24 layers, H=2048, 16 heads, 16 KV heads, head_dim=128, 60 experts, `moe_intermediate_size`=1408, `shared_expert_intermediate_size`=5632, vocab=151936.
-
-**Llama constants** (from [`profiler/llama/config.py`](../profiler/llama/config.py)): 16 layers, H=2048, 32 heads, 8 KV heads, head_dim=64, intermediate=8192, vocab=128256.
+**Llama constants** ([`profiler/llama/config.py`](../profiler/llama/config.py)): 16 layers, H=2048, 32 heads, 8 KV heads, head_dim=64, intermediate=8192, vocab=128256.
 
 ### Tier B — PyTorch forward graph with shapes (pre-compile)
 
-| Tool | Install | Use |
-|------|---------|-----|
-| **torchinfo** | `pip install torchinfo` | Tabular summary: `summary(model, input_size=(1, 1))` |
-| **torch.fx + ShapeProp** | built-in | `ShapeProp(symbolic_trace(model)).propagate(sample_input)` |
-| **torchview** | `pip install torchview` | Graphviz DAG with `show_shapes=True` |
-
-Use a **decode-step** wrapper (batch=1, seq_len=1). Shapes here reflect the **traced PyTorch** graph before `neuronx-cc` / NxD compilation; they will diverge from NEFF after TP, fusion, and cache layout changes.
+Decode-step wrapper (batch=1, seq_len=1). Shapes reflect traced PyTorch before `neuronx-cc` / NxD compilation.
 
 ### Tier C — Compiled NEFF slot shapes (authoritative for the mapper)
 
-**What they are:** Each entry in `neff_node[]` is a static graph I/O slot — `input0`, `input1`, … — with a shape string, byte `size`, and `type` (`IN`, `OUT`, `WEIGHT`). These are the **whole-slot** geometries at the NEFF boundary, after tensor-parallel sharding and compiler layout choices. They are **not** kernel-internal tile sizes and **not** per-DMA chunk sizes.
+| Model | Decode `model-key` | Profile path (this host) |
+|-------|-------------------|--------------------------|
+| Llama 3.2 1B NXDI | **`912553378486640`** | `/dev/shm/traced_model/Llama-3.2-1B-Instruct-nxdi-lnc1-tp4-b1-ctx128-seq256/profile` |
+| Qwen 1.5 MoE A2.7B | **`902259225960644`** | `/dev/shm/traced_model/Qwen1.5-MoE-A2.7B-lnc1-tp4-b1-p128-s256-rtopk_softmax/profile` |
 
-| Model | Decode `model-key` | Capture script |
-|-------|-------------------|----------------|
-| Llama 3.2 1B | `446048307616134` | `profiler/capture_and_export.sh` |
-| Qwen 1.5 MoE A2.7B | `307929685239809` | `profiler/capture_and_export_qwen.sh` |
+Older captures used different NEFF hashes (`446048307616134` Llama, `307929685239809` Qwen). Always pass the `model-key` from the exported JSON filename.
 
-#### How to view NEFF slot shapes
-
-| Method | What you get |
-|--------|----------------|
-| **Neuron Explorer UI** | Tensor Viewer on the capture directory: `neuron-explorer view -d "$PROFILE" -p 8081` (SSH tunnel if remote). Best for browsing aggregates; same underlying NEFF metadata as JSON export. |
-| **Exported device JSON** | `neff_node[]` inside per-core files, e.g. `i-*_nc_0_model_446048307616134.json`. Produced by `capture_and_export.sh` / `capture_and_export_qwen.sh` via `neuron-explorer view --output-format json`. |
-| **Raw JSON (no mapper)** | `jq '.neff_node[] \| {variable_name, shape, size, type}' device.json` — raw slot table. |
-| **`NeffTensorCatalog` (mapped)** | Runs the heuristic mapper on each node; prints semantic names. Snippet below. |
-| **Ingested dmsim trace** | `dmsim ingest` writes `tensors[]` with `name` (semantic), `bytes` (from `neff_node.size`), `category` (from mapper). |
-| **`visualize_trace.py`** | Bar charts of tensor **counts/bytes by category** from ingested trace — indirect view of catalog + mapper quality. |
-
-**Kernels (separate from slot shapes):** `layer_summary[]` — per-kernel `name`, `start`, `end`, FLOPs. Timing boundaries only; does not list input/output tensor shapes per kernel.
-
-**Inspect raw + mapped slots:**
+#### Inspect raw + mapped slots
 
 ```python
 import re, json
 from pathlib import Path
 from dmsim.trace.neuron_json_ingest import discover_profile_dir, resolve_device_json
-from dmsim.trace.tensor_name_mapper import NeffTensorCatalog
+from dmsim.trace.tensor_name_mapper import NeffTensorCatalog, create_mapper_for_tensors
 
 PROFILE = Path("/dev/shm/traced_model/.../profile")
-dev = json.load(open(resolve_device_json(discover_profile_dir(PROFILE), 0, "446048307616134")))
+MODEL_KEY = "912553378486640"
+dev = json.load(open(resolve_device_json(discover_profile_dir(PROFILE), 0, MODEL_KEY)))
 
-# Raw NEFF slots
-for node in dev.get("neff_node") or []:
-    print(node.get("variable_name"), node.get("shape"), node.get("size"), node.get("type"))
+mapper = create_mapper_for_tensors(dev["neff_node"])
+print(type(mapper).__name__, "n_layers=", getattr(mapper, "n_layers", None))
 
-# After heuristic mapper
 cat = NeffTensorCatalog(dev)
-
-def idx(e):
-    m = re.search(r"\d+", e.variable_name)
-    return int(m.group()) if m else 0
-
-for e in sorted(cat.entries(), key=idx):
-    print(f"{e.variable_name:12} {e.shape:20} {e.bytes:10} -> {e.semantic_name:40} {e.category.value}")
+for e in sorted(cat.entries(), key=lambda x: int(re.search(r"\d+", x.variable_name).group())):
+    print(f"{e.variable_name:12} {e.shape:22} {e.bytes:10} -> {e.semantic_name:45} {e.category.value}")
 ```
 
-Copy profile JSON from the Trainium host when access is restored, then validate against §4.
+#### Where NEFF shapes flow in dmsim
 
-#### Where NEFF slot shapes are already used in this repo
+| Stage | File | Role |
+|-------|------|------|
+| Catalog build | `tensor_name_mapper.py` | `NeffTensorCatalog` → semantic name + category |
+| Trace seeding | `neuron_json_ingest.py` | Each catalog entry → `TensorRecord` |
+| Capture selection | `neuron_json_ingest.py` | `resolve_device_json` picks lowest-unknown-DMA `pid_*` |
+| Named DMA | same | `NeffTensorCatalog.resolve_dma` |
+| Unattributed DMA | same | skipped when `--skip-unattributed-dma`; else `_ProportionalCategoryAssigner` |
+| Viz | `visualize_trace.py` | Category bar charts from ingested trace |
 
-```mermaid
-flowchart LR
-    JSON["device JSON\nneff_node[]"]
-    CAT["NeffTensorCatalog\nbuild_catalog"]
-    MAP["create_mapper_for_tensors\nshape + index heuristics"]
-    INGEST["neuron_json_ingest"]
-    TRACE["dmsim trace\ntensors + accesses"]
-    SIM["dmsim run / compare"]
-    VIZ["visualize_trace.py"]
+**DGE:** `ENABLE_DGE_NOTIFS=1` attributes dynamic DMA to graph nodes. Without DGE, Llama decode DMA is ~100% `variable=unknown` (see §5.2).
 
-    JSON --> CAT
-    CAT --> MAP
-    MAP --> CAT
-    CAT --> INGEST
-    INGEST --> TRACE
-    TRACE --> SIM
-    TRACE --> VIZ
-```
-
-| Stage | File | How `neff_node` is used |
-|-------|------|-------------------------|
-| Catalog build | [`tensor_name_mapper.py`](../src/dmsim/trace/tensor_name_mapper.py) | `NeffTensorCatalog` reads all nodes; `map_tensor(variable, shape, type)` → semantic name + category; indexes `by_variable` and `by_size`. |
-| Trace seeding | [`neuron_json_ingest.py`](../src/dmsim/trace/neuron_json_ingest.py) | `_seed_catalog_tensors` — each catalog entry becomes a `TensorRecord` (`name`, `bytes`, `category`) in the ingested trace. |
-| Named DMA | same | `resolve_dma` — if `dma.variable` matches `inputN` or unique byte size, attach access to catalog entry. |
-| Unattributed DMA | same | `_ProportionalCategoryAssigner.from_catalog` — when decode DMA is `variable=unknown`, split bytes across synthetic `hbm_traffic_{category}` tensors **in proportion to NEFF catalog byte totals per category**. |
-| Simulation | `dmsim.cli run` | Placement / eviction use trace tensor `bytes` and `category` (derived from mapper + catalog sizes). |
-| Visualization | [`visualize_trace.py`](../profiler/visualize_trace.py) | Charts static `tensor.bytes` (from catalog) vs access traffic. |
-
-**What NEFF shapes are *not* used for:** binding dynamic DMA rows to individual layers (decode ~99% `unknown`); kernel-internal matmul tiling; sub-tensor DMA chunk geometry (`transfer_size` is often 256 B on dynamic queues, unrelated to full slot shape).
+**Semantic vs simulator category:** RMSNorm slots (`attention_norm`, `input_layernorm`, etc.) map to mapper `norm_weight` but dmsim `TensorCategory.WEIGHT` — intentional; norms are static weight tensors in the simulator.
 
 ---
 
 ## 2. Shape equivalence caveats (HF vs NEFF vs tiling)
 
-Do not expect `neff_node[]` shapes to match `model.named_parameters()` one-to-one.
+| Transform | Effect | Example |
+|-----------|--------|---------|
+| **Tensor parallelism (TP=4)** | Dims divided across ranks | vocab `128256→32064`; attn `2048→512` |
+| **Weight fusion** | Multiple HF matrices → one slot | Qwen gate+up → `[60 2048 704]`; QKV → `qkv_proj` / `qkv_tile` |
+| **NXDI tiling (Llama decode)** | Dense weights become 6D tile slots | qkv `[4 64 2 4 4 128]`, wo `[2 128 16 4 2 32]` |
+| **KV layout** | bshd in source vs bhsd on NEFF | Llama persistent KV `[1 2 256 64]` |
+| **KV staging (Llama NXDI)** | 5D workspace, not persistent cache | `[8 128 16 2 128]` → `kv_cache` for traffic accounting |
+| **Kernel / DMA tiling** | Below NEFF slot granularity | DMA `transfer_size` often 256 B |
 
-| Transform | Effect on shapes | Example |
-|-----------|------------------|---------|
-| **Tensor parallelism (TP=4)** | Vocab, heads, intermediate dims divided across ranks | vocab `128256→32064`; attn proj `2048→512` |
-| **Weight fusion** | Multiple HF matrices → one NEFF slot | Qwen expert `gate_proj` + `up_proj` → `[60 2048 2816]` |
-| **Transpose / layout** | Same elements, different axis order | Expert fusion uses `.T` in [`convert_qwen_moe_to_neuron_state_dict`](../profiler/qwen_moe/neuron_modeling_qwen_moe.py) |
-| **KV cache layout** | `bshd` in PyTorch source vs `bhsd` on decode NEFF | Llama `[1 2 256 64]` not `[1 128 2 64]` |
-| **GQA head repeat (Llama)** | KV heads repeated before TP shard | `wk`/`wv` become `[128 2048]` not raw HF `[512 2048]` |
-| **Kernel / DMA tiling** | **Below** NEFF slot granularity | `layer_summary` kernels tile matmuls; DMA `transfer_size` is chunk bytes — neither appears in `neff_node.shape` |
-
-**Valid comparisons:**
-
-| From | To | Valid? |
-|------|-----|--------|
-| HF `named_parameters()` | `neff_node[]` directly | No |
-| HF + NxD layout recipe (§4 tables) | `neff_node[]` | Yes — expected NEFF shapes |
-| Mapper rules | `neff_node[]` on same capture | Yes — the real functional test |
-| PyTorch `torchinfo` | `neff_node[]` | Only after documenting compile transforms |
-
-**NxD layout recipes in-repo:** [`profiler/llama/model.py`](../profiler/llama/model.py) (Llama TP + KV), [`profiler/qwen_moe/neuron_modeling_qwen_moe.py`](../profiler/qwen_moe/neuron_modeling_qwen_moe.py) (MoE fusion). The §4 tables are derived from these plus captured decode conventions in [LLAMA32_PROFILING_AND_DMSIM.md](../profiler/LLAMA32_PROFILING_AND_DMSIM.md).
+**Valid comparisons:** HF + layout recipe → expected NEFF; mapper rules → live `neff_node[]`; ingest category breakdown → mapper quality.
 
 ---
 
 ## 3. PyTorch graph tooling quick reference
 
-See §1 Tier A/B. For compiled graphs, Tier C (`neff_node` + `layer_summary`) is authoritative for dmsim.
-
-```bash
-pip install torchinfo
-python3 -c "from torchinfo import summary; ..."
-```
+See §1 Tier A/B. For compiled graphs, Tier C is authoritative.
 
 ---
 
-## 4. Expected NEFF shape catalogs (TP=4, decode)
+## 4. Observed NEFF shape catalogs (TP=4, decode, live captures)
 
-These are **expected compiled NEFF slot shapes** (HF + TP=4 + NxD fusion/layout), not raw HF parameter shapes. Trace config: TP=4, batch=1, seq=256 (see [`profiler/run_llama32_1b_trn2.py`](../profiler/run_llama32_1b_trn2.py), [`profiler/run_qwen_moe_trn2.py`](../profiler/run_qwen_moe_trn2.py)). Confirm against real `neff_node[]` from Tier C when profile JSON is available.
+Tables from **independent audit 20 June 2026** — nc0 device JSON selected by `resolve_device_json` (DGE-preferred).
 
-### Llama-3.2-1B-Instruct
+### 4.1 Llama-3.2-1B-Instruct NXDI (`912553378486640`)
 
-| Semantic name | NEFF shape | Notes |
-|---------------|------------|-------|
-| `tokens` | `[1 1]` | decode step |
-| `position` | `[1]` | |
-| `attention_mask` | `[1 1]` | |
-| `layer_L.cache_k` / `cache_v` | `[1 2 256 64]` | **bhsd**: 8 KV heads / TP4 = 2; seq=256 |
-| `embedding.weight` | `[32064 2048]` | vocab/TP |
-| `layer_L.attention.wq.weight` | `[2048 512]` | H × (n_heads·head_dim/TP) |
-| `layer_L.attention.wk.weight` | `[128 2048]` | (n_kv·head_dim/TP) × H — transposed vs HF |
-| `layer_L.attention.wv.weight` | `[128 2048]` | same |
-| `layer_L.attention.wo.weight` | `[512 2048]` | |
-| `layer_L.attention_norm.weight` | `[2048]` | |
-| `layer_L.mlp.gate_proj.weight` | `[2048 2048]` | intermediate/TP = 8192/4 |
-| `layer_L.mlp.up_proj.weight` | `[2048 2048]` | |
-| `layer_L.mlp.down_proj.weight` | `[2048 2048]` | |
-| `layer_L.mlp_norm.weight` | `[2048]` | |
-| `output.weight` | `[32064 2048]` | lm_head TP shard |
-| `final_norm.weight` | `[2048]` | |
+234 `neff_node` entries per core (nc0–nc3 identical). Mapper: **`LLaMANameMapper`**, `n_layers=16`.
 
-KV layout in [`profiler/llama/model.py`](../profiler/llama/model.py) registers caches as **bshd** `(batch, seq, n_kv_heads, head_dim)`, but decode NEFF uses **bhsd** `[1 2 256 64]` per [LLAMA32_PROFILING_AND_DMSIM.md](../profiler/LLAMA32_PROFILING_AND_DMSIM.md).
+| Semantic name (mapped) | NEFF shape | Count | Static (nc0) | Notes |
+|------------------------|------------|-------|--------------|-------|
+| `tokens`, `position`, `attention_mask` | `[1 1]`, `[1 256]`, `[1 1]` | 1+2×dup | &lt;1 KiB | runtime → activation |
+| `layer_L.cache_k` / `cache_v` | `[1 2 256 64]` | 32 IN + 32 OUT | 4 MiB | bhsd persistent KV |
+| `layer_L.attention.kv_staging_{0,1,2}` | `[8 128 16 2 128]` | 48 | 384 MiB | NXDI staging → **kv_cache** |
+| `layer_L.cache_k_tile` / `cache_v_tile` | `[128 16 2 64]`, `[128 16 2 2 32]` | 16 + 16 | 16 MiB | tiled KV views |
+| `layer_L.attention.qkv_tile.weight` | `[4 64 2 4 4 128]` | 16 | 32 MiB | fused Q/K/V tile (no separate wk/wv slots) |
+| `layer_L.attention.wo.weight` | `[2 128 16 4 2 32]` | 16 | 32 MiB | NXDI output proj tile |
+| `layer_L.attention_norm` / `mlp_norm` | `[128 16]` | 32 + 1 final | 0.1 MiB | group 33 = 2·16 + 1 |
+| `final_norm.weight` | `[128 16]` | 1 (in group above) | — | trailing slot in norm group |
+| `embedding.weight` | `[128256 512]` | 1 | 125 MiB | full-vocab NEFF view |
+| `output.weight` | `[32064 2048]` | 1 | 125 MiB | lm_head TP shard |
+| `logits` | `[128256]` | 1 | 0.5 MiB | decode output |
+| Compiler constants | `[32 128 1 1]`, `[128 128 1 1]`, etc. | 19 WEIGHT | 0.3 MiB | → **activation** |
 
-### Qwen1.5-MoE-A2.7B
+**Not present:** dense `[2048 512]` wq, `[128 2048]` wk/wv, `[2048 2048]` MLP — NXDI uses tiled 6D slots.
 
-| Semantic name | NEFF shape | Notes |
-|---------------|------------|-------|
-| `layer_L.cache_k` / `cache_v` | `[1 4 256 128]` | bhsd; 16 KV heads/TP4 |
-| `layer_L.moe.router.gate.weight` | `[60 2048]` | |
-| `layer_L.moe.expert.gate_up.weight` | `[60 2048 2816]` | Neuron fused **(E, H, 2·I)** per [`convert_qwen_moe_to_neuron_state_dict`](../profiler/qwen_moe/neuron_modeling_qwen_moe.py) |
-| `layer_L.moe.expert.down_proj.weight` | `[60 1408 2048]` | Neuron fused **(E, I, H)** |
-| `layer_L.attention.wq/wk/wv.weight` | `[2048 512]` | MHA (16·128/4) |
-| `layer_L.attention.wo.weight` | `[512 2048]` | |
-| `layer_L.mlp.shared.gate_proj.weight` | `[2048 1408]` | shared expert |
-| `layer_L.mlp.shared.up_proj.weight` | `[2048 1408]` | |
-| `layer_L.mlp.shared.down_proj.weight` | `[1408 2048]` | |
-| `layer_L.input_layernorm.weight` | `[1 2048]` | mapper expects `(1, H)` |
-| `layer_L.post_attention_layernorm.weight` | `[2048]` | mapped as `norm.weight` |
-| `layer_L.attention.bias` | `[512]` | QKV bias shard (o_proj bias injected as zeros in Neuron model) |
-| `embedding.weight` | `[37984 2048]` | 151936/4 |
-| `output.weight` | `[151936 512]` | full vocab × hidden/TP |
+**Chip static (4 cores):** kv_cache 56.2% · weight 43.8% · activation &lt;0.1% (~2878 MiB total).
+
+### 4.2 Qwen1.5-MoE-A2.7B (`902259225960644`)
+
+561 `neff_node` entries per core. Mapper: **`QwenMoENameMapper`**, `n_layers=24`, `moe_intermediate_size=1408`.
+
+| Semantic name (mapped) | NEFF shape | Count | Static (nc0) | Notes |
+|------------------------|------------|-------|--------------|-------|
+| `layer_L.cache_k` / `cache_v` | `[1 4 256 128]` | 48 IN + 48 OUT | 24 MiB | bhsd KV |
+| `layer_L.moe.router.gate.weight` | `[60 2048]` | 24 | 5.6 MiB | ✓ |
+| `layer_L.moe.expert.gate_up.weight` | `[60 2048 704]` | 24 | 3960 MiB | TP `(E,H,2I/TP)` ✓ |
+| `layer_L.moe.expert.down_proj.weight` | `[60 352 2048]` | 24 | 1980 MiB | TP `(E,I/TP,H)` ✓ |
+| `layer_L.attention.qkv_proj.weight` | `[2048 512]` | 24 | 48 MiB | one fused slot per layer ✓ |
+| `layer_L.attention.wo.weight.tpN` | `[512 2048]` | 72 | 144 MiB | 3 TP shards/layer, unique names |
+| `layer_L.attention.bias.tpN` | `[512]` | 72 | 0.1 MiB | 3 TP shards/layer, unique names |
+| `layer_L.mlp.shared.gate/up/down` | `[2048 1408]`, `[1408 2048]` | 24 + 48 | 396 MiB | ✓ |
+| `layer_L.input_layernorm.weight` | `[1 2048]` | 24 | 0.1 MiB | ✓ |
+| `layer_L.norm.weight` (+ `final_norm`) | `[2048]` | 73 | 0.3 MiB | group 73 = 3·24 + 1 |
+| `embedding.weight` / `output.weight` | `[37984 2048]`, `[151936 512]` | 1 each | 148 MiB each | ✓ |
+| `logits` | `[151936]` | 1 | 0.6 MiB | decode output |
+| Compiler `bp_mask_*` | `[64 128 1 1]` | 48 | 1.5 MiB | → **activation** (not other) |
+
+**Not present:** unsharded expert `[60 2048 2816]` (TP uses 704-wide dim). No Llama-style NXDI KV staging shapes.
+
+**Chip static (4 cores):** weight 99.6% · kv_cache 0.4% · activation &lt;0.1% (~27.4 GiB total).
 
 ---
 
-## 5. Mapper audit results
+## 5. Independent audit results (20 June 2026)
 
-Tests run: `pytest tests/test_tensor_name_mapper.py tests/test_qwen_moe_tensor_mapper.py` (4 passed). Additional synthetic NEFF tensors were fed through `create_mapper_for_tensors` inline (not saved as a script).
+### Method
 
-### 5.1 Critical — Llama decode selects `QwenMoENameMapper`
+1. `resolve_device_json` on mixed Llama profile (2 pids) and Qwen profile.
+2. `NeffTensorCatalog` + `create_mapper_for_tensors` on nc0–nc3.
+3. Fresh 4-core ingest: `--min-transfer-bytes 1 --no-aggregate-dma --skip-unattributed-dma --max-access-events 0`.
+4. `pytest tests/test_tensor_name_mapper.py tests/test_qwen_moe_tensor_mapper.py tests/test_neuron_ingest.py` — **18 passed**, 4 skipped (no bundled example profile).
 
-`_looks_like_qwen_moe_graph()` returns true when **≥4 bhsd KV tensors** OR ≥12 expert-like 2D/3D tensors.
+### 5.1 Regression checklist
 
-Llama decode KV shape `[1 2 256 64]` is classified as **bhsd** by `classify_kv_shape`. With 16 layers × 2 (K+V) = **32 bhsd tensors**, the full decode NEFF triggers Qwen mapper selection.
+| Check | Llama | Qwen |
+|-------|-------|------|
+| Mapper class | `LLaMANameMapper` ✓ | `QwenMoENameMapper` ✓ |
+| `n_layers` | 16 ✓ | 24 ✓ |
+| `moe_intermediate_size` | — | 1408 ✓ |
+| Fallback `inputN_norm` | **0** ✓ | **0** ✓ |
+| Duplicate catalog `tensor_id` | **0** ✓ | **0** ✓ |
+| Static `other` tensors | **0** ✓ | **0** ✓ |
+| Mis-rotated wq/wk/wv on `[2048 512]` | N/A (no dense q) | **0** (all `qkv_proj`) ✓ |
+| nc0–nc3 catalog identical | ✓ | ✓ |
 
-**Measured:** synthetic full Llama decode NEFF → `QwenMoENameMapper` → **146/182 tensors misnamed** (all attention/MLP weights mapped to MoE/shared rules or `unknown`).
+### 5.2 DGE capture selection
 
-| Expected | Got (example) |
-|----------|---------------|
-| `layer_0.attention.wq.weight` `[2048 512]` | `layer_0.mlp.shared.gate_proj.weight` |
-| `layer_0.attention.wk.weight` `[128 2048]` | `layer_0.moe.router.gate.weight` |
-| `layer_0.mlp.gate_proj.weight` `[2048 2048]` | `input41` (unknown) |
+Mixed Llama profile contains two nc0 captures for the same NEFF:
 
-KV tensors **do** get correct layer names under Qwen mapper (`layer_L.cache_k/v`), but every weight is wrong.
+| pid | unknown DMA | total DMA | unknown % |
+|-----|-------------|-----------|-----------|
+| `17801` | 151,316 | 151,351 | **99.98%** |
+| `30400` | 1,598 | 152,330 | **1.0%** |
 
-**Fix direction:** Require expert-like 2D/3D tensors for Qwen detection, not bhsd KV alone; or exclude graphs with Llama-dense weight signatures (e.g. `[128 2048]` wk shapes, no `[60 …]` experts).
+`resolve_device_json(..., prefer_dge_capture=True)` selects **`pid_30400`** automatically. Qwen capture (`pid_13149`) has 0.6% unknown DMA (2403 / 379,023).
 
-### 5.2 Critical — Llama KV loses layer index under `LLaMANameMapper`
+`Coalesced_memloc_split_*` DMA variables (588 rows on Llama nc0) resolve to **activation** via `resolve_dma`.
 
-Even when `LLaMANameMapper` is used, decode KV `[1 2 256 64]` maps to generic `input3_kv_cache` (layer_index=-1), not `layer_0.cache_k`.
+### 5.3 Llama — catalog + ingest
 
-**Cause:** Early return in `_map_input_tensor` (lines 307–317) fires on any KV-shaped input **before** index-based layer assignment (lines 319–339). Confirmed by unit test expecting `input3_kv_cache` in [`tests/test_tensor_name_mapper.py`](../tests/test_tensor_name_mapper.py).
+**Catalog (nc0, `pid_30400`):**
 
-For isolated `LLaMANameMapper` with decode KV `[1 2 256 64]`:
-- `input3` → `input3_kv_cache`, `layer_index=-1` (not `layer_0.cache_k`)
+| Category | Tensors | Static bytes | Share |
+|----------|---------|--------------|-------|
+| kv_cache | 144 | 404 MiB | 56.2% |
+| weight | 68 | 315 MiB | 43.8% |
+| activation | 22 | 0.3 MiB | &lt;0.1% |
+| other | 0 | 0 | — |
 
-Prefill-style bshd `[1 128 2 64]` hits the same early-return path under `LLaMANameMapper`; layer assignment via input index only runs if the early KV heuristic is skipped.
+**Ingest (fresh 4-core, mixed profile dir, 600,672 access events, 4.63 GiB):**
 
-**Fix direction:** Assign layer from input index (or ordered KV slot list, as Qwen does) before returning generic KV name; or only use early heuristic when index is outside the KV range.
+| Category | Access bytes | Share |
+|----------|--------------|-------|
+| **kv_cache** | **3.14 GiB** | **67.9%** |
+| weight | 1.48 GiB | 32.0% |
+| activation | 6 MiB | 0.1% |
+| other | 0 | 0.0% |
 
-### 5.3 Critical — Qwen expert 3D shapes swapped
+KV-dominated decode traffic — matches expectation with DGE + NXDI staging attribution.
 
-Neuron fusion ([`neuron_modeling_qwen_moe.py`](../profiler/qwen_moe/neuron_modeling_qwen_moe.py)):
+### 5.4 Qwen — catalog + ingest
 
-| Tensor | Actual shape |
-|--------|--------------|
-| `gate_up_proj.weight` | `(E, H, 2·I)` = `[60 2048 2816]` |
-| `down_proj.weight` | `(E, I, H)` = `[60 1408 2048]` |
+**Catalog (nc0, `pid_13149`):**
 
-Mapper `_map_moe_weight_shape` rules:
+| Category | Tensors | Static bytes | Share |
+|----------|---------|--------------|-------|
+| weight | 412 | 6831 MiB | 99.6% |
+| kv_cache | 96 | 24 MiB | 0.4% |
+| activation | 53 | 1.5 MiB | &lt;0.1% |
+| other | 0 | 0 | — |
 
-| Rule | Condition | Intended name |
-|------|-----------|---------------|
-| gate_up | `shape[2] == hidden_size` | `expert.gate_up` |
-| down | `shape[1] == hidden_size` | `expert.down_proj` |
+**Ingest (fresh 4-core, 1,503,901 access events, 9.02 GiB):**
 
-**Measured on Neuron shapes:**
+| Category | Access bytes | Share |
+|----------|--------------|-------|
+| weight | 8.89 GiB | 98.6% |
+| kv_cache | 94 MiB | 1.0% |
+| activation | 27 MiB | 0.3% |
+| other | 0 | 0.0% |
 
-| Shape | Expected | Got |
-|-------|----------|-----|
-| `[60 2048 2816]` | `gate_up` | `expert.down_proj` ❌ |
-| `[60 1408 2048]` | `down_proj` | `expert.gate_up` ❌ |
+Weight-dominated — expected for 60 experts × 24 layers. Low KV % is architectural, not a mapper defect.
 
-TP-sharded shapes `[60 352 2048]` / `[60 2048 352]` map correctly to the (wrong) rules — still swapped semantically if Neuron uses unsharded `(E,H,2I)` layout.
+### 5.5 Fix history (all resolved)
 
-**Fix direction:** Match `(E, H, 2·I)` → gate_up and `(E, I, H)` → down_proj.
+| Issue | Status | Evidence (20 Jun) |
+|-------|--------|-------------------|
+| Llama selects Qwen mapper | Fixed | `LLaMANameMapper` on live NEFF |
+| Llama KV layer index | Fixed | `[1 2 256 64]` → `layer_L.cache_k/v` |
+| Qwen expert gate_up/down swap | Fixed | `[60 2048 704]` / `[60 352 2048]` |
+| Qwen `moe_intermediate_size`=512 | Fixed | detects 1408 |
+| Llama `[128 16]` norm group=33 | Fixed | `attention_norm` / `mlp_norm` + `final_norm` |
+| Qwen `[2048]` norm group=73 | Fixed | `layer_L.norm.weight` ×3/layer + `final_norm` |
+| Qwen fused QKV `[2048 512]` | Fixed | `attention.qkv_proj.weight` |
+| Qwen wo/bias TP triplication | Fixed | `.tpN` suffix; 72 unique semantic + tensor IDs |
+| NXDI qkv tile naming | Fixed | `attention.qkv_tile.weight` |
+| Compiler WEIGHT slots | Fixed | 19 Llama + 48 Qwen `bp_mask` → activation |
+| Mixed DGE profile | Fixed | auto-select `pid_30400` |
+| `Coalesced_memloc*` DMA | Fixed | → activation |
+| KV layout taxonomy | Fixed | `classify_kv_shape` docstring |
 
-### 5.4 High — Qwen wq/wk/wv not distinguished; layer index fails
+### 5.6 Residual notes (not bugs)
 
-All three projections share shape `[2048 512]`. With 24 layers, the shape group has **72 tensors**. `_layer_index_in_group` only handles group sizes `n_layers`, `2·n_layers`, or `n_layers·2` with pos `< n_layers`; **72 returns -1**.
-
-**Measured:** `wq`, `wk`, `wv` all → `input171` (unknown).
-
-**Fix direction:** Use input-index ordering within shape groups (like KV slots), or separate rules for wk/wv (e.g. HF transposed layouts if they differ on NEFF).
-
-### 5.5 High — Qwen shared `gate_proj` / `up_proj` ambiguous
-
-`sgate` and `sup` share `[2048 1408]` → 48 tensors in one group. Layer index works (`pos // 2`), but **both map to the same rule** (`shared.gate_proj`); `up_proj` has no rule.
-
-**Measured:** `sgate` → `input267` (unknown), `sup` → `input267` (unknown). Likely autodetect / group-order interaction; both shapes need distinct mapping (index offset within the 9-weight block or separate shape signatures).
-
-### 5.6 Medium — Other gaps
-
-| Issue | Detail |
-|-------|--------|
-| `shared_expert_gate.weight` | Not in mapper; Neuron adds per [`neuron_modeling_qwen_moe.py`](../profiler/qwen_moe/neuron_modeling_qwen_moe.py) |
-| Hierarchical router `linear_group.weight` | `[n_group, H]` when `--router-kernel hierarchical`; not mapped |
-| Llama MLP `[2048 2048]` | No Qwen rule; stays `unknown` when Qwen mapper wrongly selected |
-| `classify_kv_shape` | Decode Llama KV tagged bhsd (Qwen layout); conflates two conventions |
-| TP-exact equality | Rules use full `moe_intermediate_size=1408`; fail if experts shard I dim |
-
-### 5.7 What works today
-
-| Case | Result |
-|------|--------|
-| Qwen KV `[1 4 256 128]` | `layer_0.cache_k` / `layer_0.cache_v` ✓ |
-| Qwen router `[60 2048]` | `layer_0.moe.router.gate.weight` ✓ |
-| Qwen `wo` `[512 2048]` | `layer_0.attention.wo.weight` ✓ |
-| Qwen `input_layernorm` `[1 2048]` | `layer_0.input_layernorm.weight` ✓ |
-| Qwen `post norm` `[2048]` | `layer_0.norm.weight` ✓ |
-| Qwen attention bias `[512]` | `layer_0.attention.bias` ✓ |
-| Qwen embedding / lm_head | Large 2D vocab rules ✓ (unit tests) |
+| Model | Note |
+|-------|------|
+| Llama | wk/wv not separate NEFF slots — fused in `qkv_tile` |
+| Llama | Embedding appears as `[128256 512]` (full vocab) not TP shard `[32064 2048]` — same semantic name |
+| Qwen | `layer_L.norm.weight` repeats 3× per layer (73 = 3·24 + 1) — correct for grouped shape |
+| Qwen | KV access ~1% vs Llama ~68% — MoE vs dense/NXDI staging, expected |
+| Both | `logits` output tensors present but not architecturally significant for weight/KV accounting |
 
 ---
 
@@ -319,43 +279,105 @@ All three projections share shape `[2048 512]`. With 24 layers, the shape group 
 ```mermaid
 flowchart TD
     NEFF["neff_node shapes"]
-    DETECT["_looks_like_qwen_moe_graph"]
-    LLAMA["LLaMANameMapper\nindex + 9-weight block"]
-    QWEN["QwenMoENameMapper\nshape groups + rules"]
+    DETECT["_looks_like_qwen_moe_graph\n(expert tensors required)"]
+    LLAMA["LLaMANameMapper\nKV slots + NXDI _map_nxdi_decode_shape"]
+    QWEN["QwenMoENameMapper\nshape groups + MoE rules"]
     OUT["semantic_name + category"]
 
     NEFF --> DETECT
-    DETECT -->|"bhsd_kv >= 4 OR expert_2d >= 12"| QWEN
+    DETECT -->|"expert_2d >= 12 OR\n(expert >= 2 AND bhsd_kv >= 4)"| QWEN
     DETECT -->|else| LLAMA
     LLAMA --> OUT
     QWEN --> OUT
 ```
 
-**Llama decode failure mode:** 32 bhsd KV tensors → Qwen path → dense weights misclassified.
+**Ingest path for decode DMA:**
+
+```mermaid
+flowchart LR
+    PICK["resolve_device_json\nprefer DGE capture"]
+    DMA["dma row"]
+    DGE["variable = sg node\n(DGE enabled)"]
+    NAMED["resolve_dma\ninputN / unique size"]
+    SKIP["skip unattributed"]
+    PROP["_ProportionalCategoryAssigner\n(fallback only)"]
+
+    PICK --> DMA
+    DMA --> DGE
+    DMA --> NAMED
+    DMA -->|"unknown, skip flag"| SKIP
+    DMA -->|"unknown, no skip"| PROP
+    DGE --> OUT["tensor + category"]
+    NAMED --> OUT
+    PROP --> OUT
+```
 
 ---
 
-## 7. Recommended fix priority
+## 7. Status — no open issues
 
-| P | Issue | Suggested change |
-|---|-------|------------------|
-| P0 | Llama → Qwen misroute | Tighten `_looks_like_qwen_moe_graph`; require expert tensors |
-| P0 | Qwen expert 3D swap | Fix gate_up/down shape conditions to `(E,H,2I)` / `(E,I,H)` |
-| P0 | Llama KV no layer | Layer assignment before generic `inputN_kv_cache` fallback |
-| P1 | Qwen wq/wk/wv group of 72 | Index-ordered slots within shape group |
-| P1 | Qwen shared up_proj | Add rule or index offset vs gate_proj |
-| P2 | KV layout taxonomy | Separate decode bhsd-for-Llama from Qwen in `classify_kv_shape` |
-| P2 | TP-tolerant matching | Compare ratios, not exact intermediate dims |
+All P0–P3 items from prior audits are **resolved** as of 20 June 2026. No new issues found in this independent audit.
 
 ---
 
-## 8. Re-audit when profile JSON is available
+## 8. Reproduce this audit
 
-1. Copy decode device JSON from Trainium (`model-key` in §1 Tier C).
-2. Print raw `neff_node[]`, then run the `NeffTensorCatalog` snippet in §1.
-3. Compare each `inputN` shape against §4 tables (not raw HF).
-4. Re-ingest and check `visualize_trace.py` category breakdown for unexpected `other` share.
+### Checklist
 
-Expected outcome if P0 bugs are present on real captures:
-- **Llama decode:** many weights labeled `moe_*` or `mlp.shared.*` or `other`
-- **Qwen decode:** expert weights with swapped names; wq/wk/wv as `other`
+1. Confirm `model-key` matches exported JSON filename.
+2. Run catalog snippet (§1); verify mapper class and `n_layers`.
+3. Count fallback `inputN_norm` — expect **0**.
+4. Verify `resolve_device_json` picks DGE capture on mixed Llama profile.
+5. Ingest 4-core with DGE; expect **kv_cache &gt; weight** (Llama) and **weight ≫ kv_cache** (Qwen).
+6. Run pytest (see §5).
+
+### Ingest commands (validated 20 June 2026)
+
+**Llama** (mixed profile dir — DGE auto-selected):
+
+```bash
+PYTHONPATH=src python3 -m dmsim.cli ingest \
+  --profile-dir /dev/shm/traced_model/Llama-3.2-1B-Instruct-nxdi-lnc1-tp4-b1-ctx128-seq256/profile \
+  --model-key 912553378486640 \
+  --min-transfer-bytes 1 --no-aggregate-dma --skip-unattributed-dma \
+  --max-access-events 0 \
+  --output data/traces/llama32_1b_decode_4core_dge_kv.json
+
+python profiler/visualize_trace.py \
+  data/traces/llama32_1b_decode_4core_dge_kv.json \
+  -o profiler/out/llama32_1b_decode_4core_dge_kv_viz
+```
+
+**Qwen:**
+
+```bash
+PYTHONPATH=src python3 -m dmsim.cli ingest \
+  --profile-dir /dev/shm/traced_model/Qwen1.5-MoE-A2.7B-lnc1-tp4-b1-p128-s256-rtopk_softmax/profile \
+  --model-key 902259225960644 \
+  --min-transfer-bytes 1 --no-aggregate-dma --skip-unattributed-dma \
+  --max-access-events 0 \
+  --output data/traces/qwen1_5_moe_decode_4core_dge_v2.json
+
+python profiler/visualize_trace.py \
+  data/traces/qwen1_5_moe_decode_4core_dge_v2.json \
+  -o profiler/out/qwen1_5_moe_decode_4core_dge_v2_viz
+```
+
+### Expected vs broken signals
+
+| Signal | Healthy | Broken |
+|--------|---------|--------|
+| Llama mapper class | `LLaMANameMapper` | `QwenMoENameMapper` |
+| Llama weight names | `qkv_tile`, `wo`, norms | `moe.*`, `inputN_norm` |
+| Llama access (DGE) | kv_cache ~60–70% | weight 100% or other &gt;5% |
+| Llama device JSON | `pid_30400` (auto) | `pid_17801` default |
+| Qwen `moe_intermediate_size` | 1408 | 512 |
+| Qwen QKV on `[2048 512]` | `qkv_proj` | rotating wq/wk/wv |
+| Qwen catalog `other` | 0 | &gt;0 or hundreds misclassified |
+| Fallback `inputN_norm` | 0 | &gt;0 |
+
+---
+
+## Appendix — initial audit bug summaries (historical)
+
+The June 2026 initial audit (synthetic / pre-fix) documented P0 bugs in the first version of this file. All P0 items are **resolved**. Keep this appendix for regression context only.

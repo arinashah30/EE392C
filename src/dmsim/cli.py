@@ -9,6 +9,7 @@ from dmsim.config.snapshot import build_compare_report, build_run_report
 from dmsim.metrics.report import compare_results, format_report, write_report_json
 from dmsim.sim.engine import run_simulation
 from dmsim.trace.schema import Trace, load_trace
+from dmsim.trace.lifetime_analysis import analyze_trace_lifetimes, result_to_dict
 from dmsim.trace.neuron_json_ingest import (
     IngestOptions,
     ingest_and_write,
@@ -135,6 +136,17 @@ def main() -> None:
         default="configs/policies/decode_tiered.yaml",
     )
     pipe_parser.add_argument("--output", type=Path, default=None)
+
+    lifetime_parser = sub.add_parser(
+        "lifetime", help="Per-tensor lifetime and SBUF stint analysis"
+    )
+    lifetime_parser.add_argument("--trace", type=Path, required=True)
+    lifetime_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Write full JSON report (default: print summary only)",
+    )
 
     args = parser.parse_args()
     root = _repo_root()
@@ -297,6 +309,43 @@ def main() -> None:
                     },
                 ),
             )
+        return
+
+    if args.command == "lifetime":
+        trace_path = _resolve(root, args.trace)
+        trace = load_trace(trace_path)
+        result = analyze_trace_lifetimes(trace)
+        if args.output:
+            out_path = _resolve(root, args.output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with out_path.open("w") as handle:
+                json.dump(result_to_dict(result), handle, indent=2)
+            print(f"Wrote {args.output}")
+        summary = result.summary
+        print(f"=== lifetime summary ({result.trace_workload}) ===")
+        print(f"  trace: {args.trace}")
+        print(f"  trace_span_ms: {summary.get('trace_span_ms', 0):.3f}")
+        print(
+            f"  tensors: {summary.get('tensor_count', 0)} "
+            f"(multi={summary.get('multi_access_tensors', 0)}, "
+            f"single={summary.get('single_access_tensors', 0)})"
+        )
+        if summary.get("lifetime_median_ms") is not None:
+            print(
+                f"  session lifetime ms: median={summary['lifetime_median_ms']:.3f} "
+                f"mean={summary.get('lifetime_mean_ms', 0):.3f} "
+                f"p90={summary.get('lifetime_p90_ms', 0):.3f}"
+            )
+        if summary.get("sbuf_tensors"):
+            print(
+                f"  sbuf max stint ms: median={summary['sbuf_max_stint_median_ms']:.3f} "
+                f"max={summary['sbuf_max_stint_max_ms']:.3f} "
+                f"({summary['sbuf_tensors']} tensors)"
+            )
+        for stats in result.bin_stats:
+            if stats.tensor_count:
+                print(f"  bin {stats.bin.value}: {stats.tensor_count} tensors")
+        return
 
 
 if __name__ == "__main__":

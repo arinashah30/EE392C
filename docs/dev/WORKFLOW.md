@@ -7,7 +7,7 @@ python3 -m dmsim.cli ingest   --profile-dir /dev/shm/new_llama_trace   --model-k
 
 python profiler/visualize_trace.py data/traces/llama32_1b_decode_4core_min1_no_unknown.json
 
-python3 -m dmsim.cli compare   --trace data/traces/llama32_1b_decode_4core_min1_no_unknown.json   --baseline-hierarchy configs/hierarchy/trainium2_baseline.yaml   --candidate-hierarchy configs/hierarchy/trainium2_diff_mem_50sbuf_25hbm.yaml   --baseline-policy configs/policies/baseline_hbm.yaml   --candidate-policy configs/policies/decode_tiered.yaml   --output data/traces/sim_results_dma_lit.json
+python3 -m dmsim.cli compare   --trace data/traces/llama32_1b_decode_4core_dge_kv.json   --baseline-hierarchy configs/hierarchy/trainium2_baseline.yaml   --candidate-hierarchy configs/hierarchy/trainium2_diff_mem_50sbuf_25hbm.yaml   --baseline-policy configs/policies/baseline_hbm.yaml   --candidate-policy configs/policies/decode_tiered.yaml   --output data/traces/sim_results_dma_lit.json
 
 python3 -m dmsim.cli compare   --trace data/traces/llama32_1b_decode_4core_min1_no_unknown.json   --baseline-hierarchy configs/hierarchy/trainium2_baseline.yaml   --candidate-hierarchy configs/hierarchy/trainium2_diff_mem_25hbm.yaml   --baseline-policy configs/policies/baseline_hbm.yaml   --candidate-policy configs/policies/decode_ltram_only.yaml   --output data/traces/sim_results_dma_lit.json
 
@@ -31,3 +31,33 @@ python3 -m dmsim.cli ingest \
   --output data/traces/qwen1_5_moe_trn2_3_4core_min1_no_unknown.json
 
 python3 -m dmsim.cli compare   --trace data/traces/qwen1_5_moe_trn2_3_4core_min1_no_unknown.json  --baseline-hierarchy configs/hierarchy/trainium2_baseline.yaml   --candidate-hierarchy configs/hierarchy/trainium2_diff_mem_25hbm.yaml   --baseline-policy configs/policies/baseline_hbm.yaml   --candidate-policy configs/policies/decode_ltram_only.yaml
+
+
+
+NEW
+
+python3 -m dmsim.cli ingest \
+  --profile-dir /tmp/llama_profile_dge_only \
+  --model-key 912553378486640 \
+  --min-transfer-bytes 1 \
+  --no-aggregate-dma \
+  --skip-unattributed-dma \
+  --max-access-events 0 \
+  --output data/traces/llama32_1b_decode_4core_dge_kv.json
+
+python profiler/visualize_trace.py \
+  data/traces/llama32_1b_decode_4core_dge_kv.json \
+  -o profiler/out/llama32_1b_decode_4core_dge_kv_viz
+
+python3 -m dmsim.cli ingest \
+  --profile-dir /dev/shm/traced_model/Qwen1.5-MoE-A2.7B-lnc1-tp4-b1-p128-s256-rtopk_softmax/profile \
+  --model-key 902259225960644 \
+  --min-transfer-bytes 1 \
+  --no-aggregate-dma \
+  --skip-unattributed-dma \
+  --max-access-events 0 \
+  --output data/traces/qwen1_5_moe_decode_4core_dge_v2.json
+
+python profiler/visualize_trace.py \
+  data/traces/qwen1_5_moe_decode_4core_dge_v2.json \
+  -o profiler/out/qwen1_5_moe_decode_4core_dge_v2_viz

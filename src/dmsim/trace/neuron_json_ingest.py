@@ -53,6 +53,9 @@ class IngestOptions:
     max_access_events: int | None = 200_000
     # When False (default), unknown dynamic DMA is split into synthetic hbm_traffic_* tensors.
     skip_unattributed_dma: bool = False
+    # When multiple device JSON captures exist for the same core+model, prefer the one
+    # with the fewest unknown DMA variables (typically DGE-enabled captures).
+    prefer_dge_capture: bool = True
 
 
 @dataclass(frozen=True)
@@ -79,11 +82,23 @@ class _ProportionalCategoryAssigner:
 
     @classmethod
     def from_catalog(cls, catalog: NeffTensorCatalog) -> _ProportionalCategoryAssigner:
+        entries = list(catalog.entries())
+        kv_count = sum(1 for entry in entries if entry.category == TensorCategory.KV_CACHE)
+        n_layers = max(kv_count // 2, 1)
+        has_decode_kv = kv_count >= 4
+
         totals: dict[TensorCategory, int] = defaultdict(int)
-        for entry in catalog.entries():
+        for entry in entries:
             if entry.category == TensorCategory.ACTIVATION:
                 continue
-            totals[entry.category] += max(entry.bytes, 1)
+            weight = max(entry.bytes, 1)
+            if has_decode_kv and entry.category == TensorCategory.KV_CACHE:
+                # Static KV bytes understate decode traffic: every layer reads K+V each step.
+                weight *= max(n_layers, 4) * 2
+            elif has_decode_kv and entry.category == TensorCategory.WEIGHT:
+                # Weight tensors are large in the NEFF table but often resident across layers.
+                weight = max(weight // max(n_layers // 2, 2), 1)
+            totals[entry.category] += weight
         if not totals:
             totals[TensorCategory.OTHER] = 1
         return cls(targets=dict(totals))
@@ -115,7 +130,13 @@ def list_neuron_cores(profile_dir: Path) -> list[int]:
     return sorted(cores)
 
 
-def resolve_device_json(profile_dir: Path, neuron_core_id: int, model_key: str | None) -> Path:
+def resolve_device_json(
+    profile_dir: Path,
+    neuron_core_id: int,
+    model_key: str | None,
+    *,
+    prefer_dge_capture: bool = True,
+) -> Path:
     profile = _load_profile(profile_dir)
     candidates: list[Path] = []
     seen: set[Path] = set()
@@ -136,11 +157,45 @@ def resolve_device_json(profile_dir: Path, neuron_core_id: int, model_key: str |
         if len(matched) == 1:
             return matched[0]
         if len(matched) > 1:
-            return matched[0]
+            return _pick_best_device_json(matched, prefer_dge_capture=prefer_dge_capture)
         raise FileNotFoundError(
             f"model_key={model_key!r} not found in profile_info of {[p.name for p in candidates]}"
         )
-    return candidates[0]
+    return _pick_best_device_json(candidates, prefer_dge_capture=prefer_dge_capture)
+
+
+def _unknown_dma_score(path: Path) -> tuple[int, int]:
+    """Return (unknown_dma_rows, total_dma_rows) using a lightweight mmap scan."""
+    import mmap
+
+    unknown = 0
+    total = 0
+    with path.open("rb") as handle:
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            pos = 0
+            while True:
+                idx = mm.find(b'"variable"', pos)
+                if idx == -1:
+                    break
+                total += 1
+                window = mm[idx : idx + 64]
+                if b"unknown" in window:
+                    unknown += 1
+                pos = idx + 1
+    return unknown, total
+
+
+def _pick_best_device_json(candidates: list[Path], *, prefer_dge_capture: bool = True) -> Path:
+    """Prefer captures with named (DGE) DMA over profiles dominated by variable=unknown."""
+    if len(candidates) == 1 or not prefer_dge_capture:
+        return sorted(candidates, key=lambda path: path.name)[0]
+
+    def sort_key(path: Path) -> tuple[int, float, str]:
+        unknown, total = _unknown_dma_score(path)
+        ratio = unknown / total if total else 1.0
+        return unknown, ratio, path.name
+
+    return min(candidates, key=sort_key)
 
 
 def _device_json_matches_model(path: Path, model_key: str) -> bool:
@@ -161,7 +216,12 @@ def ingest_neuron_json_profile(
     opts = options or IngestOptions()
     profile_dir = discover_profile_dir(profile_dir)
     profile = _load_profile(profile_dir)
-    device_path = resolve_device_json(profile_dir, opts.neuron_core_id, opts.model_key)
+    device_path = resolve_device_json(
+        profile_dir,
+        opts.neuron_core_id,
+        opts.model_key,
+        prefer_dge_capture=opts.prefer_dge_capture,
+    )
     device = _load_json(device_path)
 
     meta = _system_metadata(profile)
@@ -447,6 +507,43 @@ def _build_from_device_dma(device: dict, opts: IngestOptions) -> tuple[dict[str,
 
         if variable in _UNATTRIBUTED_VARIABLES and _is_unattributed_route(src, dst):
             if opts.skip_unattributed_dma:
+                continue
+            resolved = catalog.resolve_dma(
+                variable,
+                transfer,
+                src=src,
+                dst=dst,
+                read_shape=dma.get("read_shape"),
+            )
+            if (
+                resolved is not None
+                and resolved.category != TensorCategory.OTHER
+                and not resolved.variable_name.startswith("hbm_traffic")
+            ):
+                record = _tensor_record_from_entry(resolved)
+                existing = tensors.get(record.id)
+                tensors[record.id] = record.model_copy(
+                    update={"bytes": max(existing.bytes if existing else 0, record.bytes)},
+                )
+                if opts.aggregate_dma:
+                    key = _AggKey(variable=variable, route=route, op=op)
+                    bucket = buckets[key]
+                    bucket.bytes += transfer
+                    bucket.count += 1
+                    if bucket.count == 1:
+                        bucket.first_ts = ts
+                    bucket.last_ts = ts
+                else:
+                    accesses.append(
+                        AccessEvent(
+                            t_ns=_device_ts_to_ns(ts),
+                            tensor_id=record.id,
+                            op=op,
+                            bytes=transfer,
+                            target_level=target_level,
+                            core_id=opts.neuron_core_id,
+                        )
+                    )
                 continue
             if opts.aggregate_dma:
                 key = _AggKey(variable=variable, route=route, op=op)

@@ -180,6 +180,10 @@ def cmd_compile(args) -> None:
     if args.clean_cache:
         _maybe_clean_compile_cache()
 
+    # NXDI requires --prompt even with --compile-only (not used during compile).
+    if not args.prompts:
+        args.prompts = ["The capital of France is"]
+
     argv = _nxdi_base_argv(args)
     argv.append("--compile-only")
     _run_nxdi(argv)

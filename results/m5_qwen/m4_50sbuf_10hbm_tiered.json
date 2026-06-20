@@ -3,31 +3,31 @@
     "baseline": "trainium2_baseline",
     "candidate": "trainium2_diff_mem_50sbuf_10hbm",
     "time_ns": {
-      "baseline": 6522600.822209638,
-      "candidate": 6516555.1008097865,
-      "pct_change": -0.09268881485534564
+      "baseline": 6511102.375949051,
+      "candidate": 6428970.672410306,
+      "pct_change": -1.2614101084038662
     },
     "energy_pJ": {
-      "baseline": 385876839115424.25,
-      "candidate": 377569180699944.6,
-      "pct_change": -2.152930047453463
+      "baseline": 385876872915460.0,
+      "candidate": 411637178483016.94,
+      "pct_change": 6.675783747527323
     },
     "hbm_traffic_bytes": {
-      "baseline": 34826574,
-      "candidate": 34202310,
-      "pct_change": -1.792493284007781
+      "baseline": 34136964,
+      "candidate": 27265088,
+      "pct_change": -20.130308014502987
     },
     "cross_domain_traffic_bytes": {
-      "baseline": 34826574,
-      "candidate": 34801918,
-      "pct_change": -0.07079651303053812
+      "baseline": 34136964,
+      "candidate": 32451364,
+      "pct_change": -4.93775603477802
     }
   },
   "baseline": {
     "label": "baseline",
     "configuration": {
       "hierarchy": {
-        "hierarchy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/hierarchy/trainium2_baseline.yaml",
+        "hierarchy_file": "/home/ubuntu/EE392C/configs/hierarchy/trainium2_baseline.yaml",
         "hierarchy_name": "trainium2_baseline",
         "instance": {
           "name": "trn2.3xlarge",
@@ -95,7 +95,7 @@
         }
       },
       "policy": {
-        "policy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/policies/baseline_hbm.yaml",
+        "policy_file": "/home/ubuntu/EE392C/configs/policies/baseline_hbm.yaml",
         "policy_name": "baseline_hbm",
         "home_level_by_category": {
           "weight": "hbm",
@@ -122,8 +122,8 @@
           2,
           3
         ],
-        "num_tensors": 3015,
-        "num_events": 1527932
+        "num_tensors": 3014,
+        "num_events": 1528029
       },
       "hierarchy_yaml": {
         "name": "trainium2_baseline",
@@ -191,34 +191,34 @@
       "hierarchy_name": "trainium2_baseline",
       "policy_name": "baseline_hbm",
       "trace_workload": "chip_cores_0_1_2_3",
-      "total_time_ns": 6522600.822209638,
-      "total_energy_pJ": 385876839115424.25,
+      "total_time_ns": 6511102.375949051,
+      "total_energy_pJ": 385876872915460.0,
       "time_by_core_ns": {
-        "0": 6522600.822209638,
-        "1": 6517199.256461916,
-        "2": 6508363.936053364,
-        "3": 6489128.410592707
+        "1": 6493077.139984009,
+        "0": 6511102.375949051,
+        "2": 6505985.511531662,
+        "3": 6484961.577236188
       },
-      "hbm_read_bytes": 22984906,
-      "hbm_write_bytes": 11841668,
-      "cross_domain_read_bytes": 22984906,
-      "cross_domain_write_bytes": 11841668,
+      "hbm_read_bytes": 22162384,
+      "hbm_write_bytes": 11974580,
+      "cross_domain_read_bytes": 22162384,
+      "cross_domain_write_bytes": 11974580,
       "kernel_wipes": 12064,
-      "refresh_energy_pJ": 385874861692070.3,
+      "refresh_energy_pJ": 385874917150195.5,
       "refresh_cycles_by_level": {
         "hbm": 215
       },
       "transfers_by_hop": {
-        "hbm->sbuf": 8409,
+        "hbm->sbuf": 8078,
         "sbuf->hbm": 186348
       },
       "energy_by_level_pJ": {
-        "hbm": 385875408692586.25,
-        "sbuf": 1430424462.0078015
+        "hbm": 385875453285765.25,
+        "sbuf": 1419631308.7972844
       },
       "latency_by_level_ns": {
-        "hbm": 12023569.342717927,
-        "sbuf": 14013723.082510328
+        "hbm": 12002278.090309396,
+        "sbuf": 13992848.514301917
       }
     }
   },
@@ -226,7 +226,7 @@
     "label": "candidate",
     "configuration": {
       "hierarchy": {
-        "hierarchy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/hierarchy/trainium2_diff_mem_50sbuf_10hbm.yaml",
+        "hierarchy_file": "/home/ubuntu/EE392C/configs/hierarchy/trainium2_diff_mem_50sbuf_10hbm.yaml",
         "hierarchy_name": "trainium2_diff_mem_50sbuf_10hbm",
         "instance": {
           "name": "trn2.3xlarge",
@@ -324,7 +324,7 @@
         }
       },
       "policy": {
-        "policy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/policies/decode_tiered.yaml",
+        "policy_file": "/home/ubuntu/EE392C/configs/policies/decode_tiered.yaml",
         "policy_name": "decode_tiered",
         "home_level_by_category": {
           "weight": "ltram",
@@ -351,8 +351,8 @@
           2,
           3
         ],
-        "num_tensors": 3015,
-        "num_events": 1527932
+        "num_tensors": 3014,
+        "num_events": 1528029
       },
       "hierarchy_yaml": {
         "name": "trainium2_diff_mem_50sbuf_10hbm",
@@ -424,40 +424,41 @@
       "hierarchy_name": "trainium2_diff_mem_50sbuf_10hbm",
       "policy_name": "decode_tiered",
       "trace_workload": "chip_cores_0_1_2_3",
-      "total_time_ns": 6516555.1008097865,
-      "total_energy_pJ": 377569180699944.6,
+      "total_time_ns": 6428970.672410306,
+      "total_energy_pJ": 411637178483016.94,
       "time_by_core_ns": {
-        "0": 6516555.1008097865,
-        "1": 6510816.935062059,
-        "2": 6502206.014653467,
-        "3": 6482858.28919269
+        "1": 6414240.671218974,
+        "0": 6428970.672410306,
+        "2": 6427379.92239291,
+        "3": 6408626.163897405
       },
-      "hbm_read_bytes": 22360642,
-      "hbm_write_bytes": 11841668,
-      "cross_domain_read_bytes": 22960250,
-      "cross_domain_write_bytes": 11841668,
+      "hbm_read_bytes": 15290508,
+      "hbm_write_bytes": 11974580,
+      "cross_domain_read_bytes": 20476784,
+      "cross_domain_write_bytes": 11974580,
       "kernel_wipes": 12064,
-      "refresh_energy_pJ": 377567216210342.25,
+      "refresh_energy_pJ": 411634945591552.25,
       "refresh_cycles_by_level": {
-        "stram": 76532,
+        "stram": 76696,
         "hbm": 215
       },
       "transfers_by_hop": {
-        "hbm->sbuf": 8187,
+        "hbm->sbuf": 5112,
         "sbuf->hbm": 186348,
-        "ltram->sbuf": 210
+        "ltram->sbuf": 1426,
+        "stram->sbuf": 203
       },
       "energy_by_level_pJ": {
-        "stram": 161140229696.0,
-        "hbm": 377406617403399.4,
-        "sbuf": 1421786863.406805,
-        "ltram": 1281674.092160004
+        "stram": 34627457242193.973,
+        "hbm": 377008398439479.4,
+        "sbuf": 1311717408.5987306,
+        "ltram": 11085768.675520264
       },
       "latency_by_level_ns": {
-        "stram": 604.1648000000024,
-        "hbm": 12009069.645335432,
-        "sbuf": 14000815.25171047,
-        "ltram": 1947.2777826086974
+        "stram": 88784.57290000512,
+        "hbm": 11810552.174467437,
+        "sbuf": 13765143.266015789,
+        "ltram": 14737.41645217361
       }
     }
   }

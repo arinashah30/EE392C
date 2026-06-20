@@ -9,7 +9,7 @@ categories (weight, kv_cache, activation, …) using architecture heuristics
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
@@ -19,6 +19,7 @@ KvLayout = Literal["bshd", "bhsd"]
 NameMapper = Union["LLaMANameMapper", "QwenMoENameMapper"]
 
 _INPUT_INDEX_RE = re.compile(r"^input(\d+)$")
+_SLOT_INDEX_RE = re.compile(r"^(?:input|output)(\d+)$")
 
 
 @dataclass
@@ -45,32 +46,57 @@ def parse_shape(shape_str: str) -> Optional[Tuple[int, ...]]:
 
 
 def classify_kv_shape(shape: Tuple[int, ...]) -> Optional[KvLayout]:
-    """Return KV layout tag if *shape* looks like an attention KV cache tensor."""
-    if len(shape) == 4:
-        if shape[2] == 1 and shape[3] == 1:
-            return None
-        batch, d1, d2, d3 = shape
-        if d3 not in (64, 128):
-            return None
-        # (batch, seq, n_kv_heads, head_dim) — Llama-style decode
-        if d1 >= 8 and d2 <= 32:
-            return "bshd"
-        # (batch, n_kv_heads, seq, head_dim) — Qwen MoE decode on trn2
-        if d1 <= 32 and d2 >= 8:
-            return "bhsd"
-    if len(shape) == 5:
-        batch, d1, d2, kv_pack, head_dim = shape
-        if kv_pack != 2 or head_dim not in (64, 128):
-            return None
-        if d1 >= 8 and d2 <= 32:
-            return "bshd"
-        if d1 <= 32 and d2 >= 8:
-            return "bhsd"
+    """Return KV layout tag if *shape* looks like an attention KV cache tensor.
+
+    Layout taxonomy (4D persistent decode slots only):
+    - **bshd** — ``(batch, seq_len, n_kv_heads, head_dim)``; classic Llama / GPT-style
+      decode before some compiler paths (e.g. ``[1 128 2 64]``).
+    - **bhsd** — ``(batch, n_kv_heads, seq_len, head_dim)``; Qwen MoE decode on Trainium
+      (e.g. ``[1 4 256 128]``) and Llama NXDI persistent KV ``[1 2 256 64]``.
+
+    5D NXDI staging buffers (``[8 128 16 2 128]``) are *not* classified here; they are
+    handled separately via ``is_nxdi_workspace_shape``.
+    """
+    if len(shape) != 4:
+        # 5D tensors such as [8 128 16 2 128] are attention workspaces on NXDI graphs,
+        # not persistent KV cache slots — do not classify them as KV.
+        return None
+    if shape[2] == 1 and shape[3] == 1:
+        return None
+    batch, d1, d2, d3 = shape
+    if batch != 1:
+        return None
+    if d3 not in (64, 128):
+        return None
+    # (batch, seq, n_kv_heads, head_dim) — Llama-style decode
+    if d1 >= 8 and d2 <= 32:
+        return "bshd"
+    # (batch, n_kv_heads, seq, head_dim) — Qwen MoE decode on trn2
+    if d1 <= 32 and d2 >= 8:
+        return "bhsd"
     return None
 
 
 def is_kv_cache_shape(shape: Tuple[int, ...]) -> bool:
     return classify_kv_shape(shape) is not None
+
+
+def is_nxdi_workspace_shape(shape: Tuple[int, ...]) -> bool:
+    """NXDI decode attention/KV staging buffer (tiled matmul workspace).
+
+    DGE attributes heavy HBM traffic here during KV gather/scatter; count as
+    kv_cache for access accounting (distinct from persistent ``[1 2 256 64]`` slots).
+    """
+    return len(shape) == 5 and shape[0] == 8 and shape[1] == 128 and shape[-1] == 128
+
+
+def is_nxdi_kv_tile_shape(shape: Tuple[int, ...]) -> Optional[str]:
+    """Return 'cache_k' / 'cache_v' when shape is a tiled KV view on NXDI decode."""
+    if len(shape) == 4 and shape[0] == 128 and shape[1] == 16 and shape[2] == 2 and shape[3] == 64:
+        return "cache_k"
+    if len(shape) == 5 and shape[0] == 128 and shape[1] == 16 and shape[2] == 2 and shape[3] == 2:
+        return "cache_v"
+    return None
 
 
 def kv_shape_description(layout: KvLayout, *, rank: int = 4) -> str:
@@ -83,6 +109,14 @@ def kv_shape_description(layout: KvLayout, *, rank: int = 4) -> str:
 
 def _input_index(var_name: str) -> Optional[int]:
     match = _INPUT_INDEX_RE.match(var_name)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _slot_index(var_name: str) -> Optional[int]:
+    """Numeric suffix for ``inputN`` or ``outputN`` NEFF slot names."""
+    match = _SLOT_INDEX_RE.match(var_name)
     if not match:
         return None
     return int(match.group(1))
@@ -145,6 +179,11 @@ class LLaMANameMapper:
         
         # Cache for mappings
         self._mapping_cache: Dict[str, SemanticTensorInfo] = {}
+        # inputN / outputN -> (layer_index, is_key) for scattered decode KV slots
+        self._kv_slots: Dict[str, Tuple[int, bool]] = {}
+        self._output_kv_slots: Dict[str, Tuple[int, bool]] = {}
+        # shape string -> sorted input variable names (for NXDI tiled decode slots)
+        self._layer_groups: dict[str, list[str]] = {}
     
     @classmethod
     def auto_detect_config(cls, tensors: List[Dict]) -> 'LLaMANameMapper':
@@ -207,7 +246,7 @@ class LLaMANameMapper:
             hidden_size = 2048
             tp_degree = 4
         
-        return cls(
+        mapper = cls(
             n_layers=n_layers,
             batch_size=batch_size,
             seq_len=seq_len,
@@ -217,6 +256,110 @@ class LLaMANameMapper:
             vocab_size=vocab_size,
             tp_degree=tp_degree
         )
+        mapper._build_kv_slots(tensors)
+        mapper._build_layer_groups(tensors)
+        return mapper
+
+    def _build_layer_groups(self, tensors: List[Dict]) -> None:
+        """Group input slots by shape for NXDI tiled decode layer indexing."""
+        groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        for t in tensors:
+            var_name = str(t.get("variable_name") or "")
+            if not var_name.startswith("input"):
+                continue
+            idx = _input_index(var_name)
+            if idx is None:
+                continue
+            shape_str = str(t.get("shape") or "")
+            groups[shape_str].append((idx, var_name))
+        self._layer_groups = {
+            shape_str: [name for _, name in sorted(entries, key=lambda item: item[0])]
+            for shape_str, entries in groups.items()
+        }
+
+    def _layer_index_in_group(self, var_name: str, shape_str: str) -> int:
+        group = self._layer_groups.get(shape_str, [])
+        if var_name not in group:
+            return -1
+        pos = group.index(var_name)
+        n = len(group)
+        if n == 1:
+            return 0
+        if n == self.n_layers:
+            return pos
+        if n == self.n_layers + 1:
+            if pos == n - 1:
+                return -1
+            return pos
+        if n == 2 * self.n_layers:
+            return pos // 2
+        if n == 2 * self.n_layers + 1:
+            if pos == n - 1:
+                return -1
+            return pos // 2
+        if n == 3 * self.n_layers:
+            return pos // 3
+        if n == 3 * self.n_layers + 1:
+            if pos == n - 1:
+                return -1
+            return pos // 3
+        if n == self.n_layers * 9:
+            return pos // 9
+        return -1
+
+    def _is_final_norm_slot(self, var_name: str, shape_str: str) -> bool:
+        """True when *var_name* is the trailing final-norm slot in a +1 shape group."""
+        group = self._layer_groups.get(shape_str, [])
+        if var_name not in group:
+            return False
+        pos = group.index(var_name)
+        n = len(group)
+        return pos == n - 1 and n in (
+            self.n_layers + 1,
+            2 * self.n_layers + 1,
+            3 * self.n_layers + 1,
+        )
+
+    def _final_norm_info(self, shape_str: str) -> SemanticTensorInfo:
+        return SemanticTensorInfo(
+            semantic_name="final_norm.weight",
+            category=self.CATEGORY_NORM,
+            layer_index=-1,
+            component="final_norm",
+            description="Final layer normalization weight",
+            shape_description=shape_str or "(hidden_size,)",
+        )
+
+    def _tp_shard_suffix(self, var_name: str, shape_str: str, *, shards_per_layer: int = 3) -> str:
+        """Return ``.tpN`` when *shape_str* group has ``shards_per_layer · n_layers`` entries."""
+        group = self._layer_groups.get(shape_str, [])
+        if len(group) != shards_per_layer * self.n_layers:
+            return ""
+        pos = self._position_in_group(var_name, shape_str)
+        if pos < 0:
+            return ""
+        return f".tp{pos % shards_per_layer}"
+
+    def _position_in_group(self, var_name: str, shape_str: str) -> int:
+        group = self._layer_groups.get(shape_str, [])
+        return group.index(var_name) if var_name in group else -1
+
+    def _build_kv_slots(self, tensors: List[Dict]) -> None:
+        """Map scattered decode KV inputs/outputs to layer indices by sorted slot order."""
+        for prefix, target in (("input", self._kv_slots), ("output", self._output_kv_slots)):
+            ordered: list[str] = []
+            for t in tensors:
+                var_name = str(t.get("variable_name") or "")
+                if not var_name.startswith(prefix):
+                    continue
+                shape = parse_shape(str(t.get("shape") or ""))
+                if shape and is_kv_cache_shape(shape):
+                    ordered.append(var_name)
+            ordered.sort(key=lambda name: _slot_index(name) or 0)
+            for pos, name in enumerate(ordered):
+                target[name] = (pos // 2, (pos % 2) == 0)
+            if prefix == "input" and ordered:
+                self.n_layers = max(self.n_layers, len(ordered) // 2)
     
     @staticmethod
     def _parse_shape(shape_str: str) -> Optional[Tuple[int, ...]]:
@@ -304,17 +447,24 @@ class LLaMANameMapper:
                 shape_description="(batch, seq_len)"
             )
 
-        # Heuristic KV detection: some exports use higher input indices and/or 5D packed shapes.
-        if shape and self._is_kv_cache_shape(shape):
+        if shape and self._is_kv_cache_shape(shape) and var_name in self._kv_slots:
+            layer_idx, is_key = self._kv_slots[var_name]
+            cache_type = "cache_k" if is_key else "cache_v"
+            cache_name = "Key Cache" if is_key else "Value Cache"
             layout = classify_kv_shape(shape) or "bshd"
             return SemanticTensorInfo(
-                semantic_name=f"{var_name}_kv_cache",
+                semantic_name=f"layer_{layer_idx}.{cache_type}",
                 category=self.CATEGORY_KV_CACHE,
-                layer_index=-1,
-                component="kv_cache",
-                description="KV cache (shape-detected)",
+                layer_index=layer_idx,
+                component=cache_type,
+                description=f"Layer {layer_idx} Attention {cache_name}",
                 shape_description=kv_shape_description(layout, rank=len(shape)),
             )
+
+        if shape:
+            nxdi = self._map_nxdi_decode_shape(var_name, shape_str, shape)
+            if nxdi is not None:
+                return nxdi
         
         # KV Cache (input3 to input3 + 2*n_layers - 1)
         kv_start = 3
@@ -328,6 +478,7 @@ class LLaMANameMapper:
 
                 cache_type = "cache_k" if is_key else "cache_v"
                 cache_name = "Key Cache" if is_key else "Value Cache"
+                layout = classify_kv_shape(shape) or "bshd"
 
                 return SemanticTensorInfo(
                     semantic_name=f"layer_{layer_idx}.{cache_type}",
@@ -335,8 +486,19 @@ class LLaMANameMapper:
                     layer_index=layer_idx,
                     component=cache_type,
                     description=f"Layer {layer_idx} Attention {cache_name}",
-                    shape_description="(batch, seq_len, n_kv_heads, head_dim)",
+                    shape_description=kv_shape_description(layout, rank=len(shape)),
                 )
+
+        if shape and self._is_kv_cache_shape(shape):
+            layout = classify_kv_shape(shape) or "bshd"
+            return SemanticTensorInfo(
+                semantic_name=f"{var_name}_kv_cache",
+                category=self.CATEGORY_KV_CACHE,
+                layer_index=-1,
+                component="kv_cache",
+                description="KV cache (shape-detected, layer unknown)",
+                shape_description=kv_shape_description(layout, rank=len(shape)),
+            )
         
         # Embedding weight (first tensor after KV cache)
         if idx == kv_end:
@@ -366,7 +528,7 @@ class LLaMANameMapper:
         if idx == total_layer_weights:
             return SemanticTensorInfo(
                 semantic_name="output.weight",
-                category=self.CATEGORY_OUTPUT,
+                category=self.CATEGORY_WEIGHT,
                 layer_index=-1,
                 component="output_projection",
                 description="Output projection (lm_head) weight",
@@ -396,6 +558,99 @@ class LLaMANameMapper:
             )
         return inferred
     
+    def _map_nxdi_decode_shape(
+        self,
+        var_name: str,
+        shape_str: str,
+        shape: Tuple[int, ...],
+    ) -> Optional[SemanticTensorInfo]:
+        """Map NXDI tiled decode NEFF slots by shape (Trainium llama-3.2 decode)."""
+        layer_idx = self._layer_index_in_group(var_name, shape_str)
+        pos = self._position_in_group(var_name, shape_str)
+
+        if is_nxdi_workspace_shape(shape):
+            staging = ("attention.kv_staging_0", "attention.kv_staging_1", "attention.kv_staging_2")
+            sub_name = staging[pos % 3] if pos >= 0 else "attention.kv_staging"
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.{sub_name}" if layer_idx >= 0 else f"{var_name}_kv_staging",
+                category=self.CATEGORY_KV_CACHE,
+                layer_index=layer_idx,
+                component="kv_staging",
+                description="Attention KV staging buffer (NXDI tiled decode)",
+                shape_description=shape_str,
+            )
+
+        kv_tile = is_nxdi_kv_tile_shape(shape)
+        if kv_tile is not None:
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.{kv_tile}_tile" if layer_idx >= 0 else f"{var_name}_{kv_tile}",
+                category=self.CATEGORY_KV_CACHE,
+                layer_index=layer_idx,
+                component=kv_tile,
+                description=f"Tiled {kv_tile} view for attention (NXDI decode)",
+                shape_description=shape_str,
+            )
+
+        if len(shape) == 6 and shape[0] == 4 and shape[-1] == 128:
+            return SemanticTensorInfo(
+                semantic_name=(
+                    f"layer_{layer_idx}.attention.qkv_tile.weight"
+                    if layer_idx >= 0
+                    else f"{var_name}_qkv_tile"
+                ),
+                category=self.CATEGORY_ATTENTION,
+                layer_index=layer_idx,
+                component="qkv_tile",
+                description="Fused Q/K/V projection tile (NXDI decode; wk/wv not separate slots)",
+                shape_description=shape_str,
+            )
+
+        if len(shape) == 6 and shape[0] == 2 and shape[1] == 128:
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.attention.wo.weight" if layer_idx >= 0 else f"{var_name}_wo",
+                category=self.CATEGORY_ATTENTION,
+                layer_index=layer_idx,
+                component="wo",
+                description="Attention output projection (NXDI tile)",
+                shape_description=shape_str,
+            )
+
+        if len(shape) == 2 and shape == (128, 16):
+            if self._is_final_norm_slot(var_name, shape_str):
+                return self._final_norm_info(shape_str)
+            norm_kind = ("attention_norm.weight", "mlp_norm.weight")
+            norm_name = norm_kind[pos % 2] if pos >= 0 else "norm.weight"
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.{norm_name}" if layer_idx >= 0 else f"{var_name}_norm",
+                category=self.CATEGORY_NORM,
+                layer_index=layer_idx,
+                component="norm",
+                description="RMSNorm weight shard (NXDI decode)",
+                shape_description=shape_str,
+            )
+
+        if len(shape) == 2 and shape[0] > 100_000:
+            return SemanticTensorInfo(
+                semantic_name="embedding.weight",
+                category=self.CATEGORY_EMBEDDING,
+                layer_index=-1,
+                component="embedding",
+                description="Token embedding weight matrix (full vocab NEFF view)",
+                shape_description="(vocab_size, hidden_size/tp) or (vocab_size/tp, hidden_size)",
+            )
+
+        if len(shape) == 2 and shape[0] > 5_000 and shape[1] == self.hidden_size:
+            return SemanticTensorInfo(
+                semantic_name="output.weight",
+                category=self.CATEGORY_WEIGHT,
+                layer_index=-1,
+                component="output_projection",
+                description="Output projection (lm_head) weight",
+                shape_description="(vocab_size/tp, hidden_size)",
+            )
+
+        return None
+
     def _map_layer_weight(self, layer_idx: int, offset: int, shape_str: str) -> SemanticTensorInfo:
         """Map a per-layer weight based on offset within the layer."""
         
@@ -459,7 +714,20 @@ class LLaMANameMapper:
             )
         
         # Other outputs are typically updated KV cache
-        # Pattern: output1-N are KV cache updates (similar to inputs)
+        if shape and self._is_kv_cache_shape(shape) and var_name in self._output_kv_slots:
+            layer_idx, is_key = self._output_kv_slots[var_name]
+            cache_type = "cache_k" if is_key else "cache_v"
+            cache_name = "Key Cache" if is_key else "Value Cache"
+            layout = classify_kv_shape(shape) or "bshd"
+            return SemanticTensorInfo(
+                semantic_name=f"layer_{layer_idx}.{cache_type}_out",
+                category=self.CATEGORY_KV_CACHE,
+                layer_index=layer_idx,
+                component=f"{cache_type}_output",
+                description=f"Layer {layer_idx} Updated {cache_name}",
+                shape_description=kv_shape_description(layout, rank=len(shape)),
+            )
+
         if shape and self._is_kv_cache_shape(shape):
             relative_idx = idx - 1
             layer_idx = relative_idx // 2
@@ -486,28 +754,33 @@ class LLaMANameMapper:
             shape_description=shape_str
         )
     
+    def _compiler_weight_info(self, var_name: str, shape_str: str) -> SemanticTensorInfo:
+        return SemanticTensorInfo(
+            semantic_name=var_name,
+            category=self.CATEGORY_RUNTIME,
+            layer_index=-1,
+            component="compiler_constant",
+            description="Compiler-generated constant / mask tile (NEFF WEIGHT slot)",
+            shape_description=shape_str,
+        )
+
+    def _is_compiler_weight_slot(self, var_name: str, shape: Optional[Tuple[int, ...]]) -> bool:
+        if re.match(r"t\d+_sg\d+$", var_name):
+            return True
+        if re.match(r"identity_\d+_sg\d+$", var_name):
+            return True
+        if var_name.startswith("constant.") and "_sg" in var_name:
+            return True
+        if "bp_mask" in var_name or "identity" in var_name:
+            return True
+        return bool(shape and len(shape) <= 4 and max(shape) <= 256)
+
     def _map_weight_tensor(self, var_name: str, shape_str: str) -> SemanticTensorInfo:
         """Map a WEIGHT type tensor (compiler-generated masks, etc.)."""
-        # These are typically compiler-generated tensors like bp_mask_*, identity_*
-        
-        if 'bp_mask' in var_name:
-            return SemanticTensorInfo(
-                semantic_name=var_name,
-                category=self.CATEGORY_UNKNOWN,
-                layer_index=-1,
-                component="compiler_mask",
-                description="Compiler-generated broadcast mask",
-                shape_description=shape_str
-            )
-        elif 'identity' in var_name:
-            return SemanticTensorInfo(
-                semantic_name=var_name,
-                category=self.CATEGORY_UNKNOWN,
-                layer_index=-1,
-                component="compiler_identity",
-                description="Compiler-generated identity tensor",
-                shape_description=shape_str
-            )
+        shape = self._parse_shape(shape_str)
+
+        if self._is_compiler_weight_slot(var_name, shape):
+            return self._compiler_weight_info(var_name, shape_str)
         
         return SemanticTensorInfo(
             semantic_name=var_name,
@@ -609,6 +882,7 @@ class QwenMoENameMapper(LLaMANameMapper):
         self.moe_intermediate_size = moe_intermediate_size
         self.kv_layout = kv_layout
         self._kv_slots: dict[str, tuple[int, bool]] = {}
+        self._output_kv_slots: dict[str, tuple[int, bool]] = {}
         self._layer_groups: dict[str, list[str]] = {}
 
     @classmethod
@@ -674,17 +948,9 @@ class QwenMoENameMapper(LLaMANameMapper):
             hidden_size = 2048
             tp_degree = 4
 
-        moe_intermediate = 1408
-        for t in tensors:
-            shape = parse_shape(t.get("shape", ""))
-            if not shape or len(shape) != 2:
-                continue
-            if shape[0] == hidden_size and 256 < shape[1] < hidden_size:
-                moe_intermediate = shape[1]
-                break
-            if shape[1] == hidden_size and 256 < shape[0] < hidden_size:
-                moe_intermediate = shape[0]
-                break
+        moe_intermediate = cls._infer_moe_intermediate_size(
+            tensors, hidden_size=hidden_size, num_experts=num_experts, tp_degree=tp_degree
+        )
 
         mapper = cls(
             n_layers=n_layers,
@@ -703,8 +969,52 @@ class QwenMoENameMapper(LLaMANameMapper):
         mapper._build_index_maps(tensors)
         return mapper
 
+    @staticmethod
+    def _infer_moe_intermediate_size(
+        tensors: List[Dict],
+        *,
+        hidden_size: int,
+        num_experts: int,
+        tp_degree: int,
+    ) -> int:
+        """Infer MoE intermediate dim; avoid confusing with attention proj (512 on TP=4)."""
+        candidates: list[int] = []
+        for t in tensors:
+            shape = parse_shape(str(t.get("shape") or ""))
+            if not shape:
+                continue
+            if len(shape) == 2:
+                if shape[0] == hidden_size and 256 < shape[1] < hidden_size:
+                    candidates.append(shape[1])
+                elif shape[1] == hidden_size and 256 < shape[0] < hidden_size:
+                    candidates.append(shape[0])
+            elif len(shape) == 3 and shape[0] == num_experts:
+                if shape[1] == hidden_size and shape[2] < hidden_size:
+                    candidates.append(max(1, shape[2] * tp_degree // 2))
+                elif shape[2] == hidden_size and shape[1] < hidden_size:
+                    candidates.append(max(1, shape[1] * tp_degree))
+        if not candidates:
+            return 1408
+        moelike = [c for c in candidates if c >= 352 and c not in {512}]
+        if moelike:
+            return Counter(moelike).most_common(1)[0][0]
+        return max(candidates)
+
+    def _map_weight_tensor(self, var_name: str, shape_str: str) -> SemanticTensorInfo:
+        """Qwen compiler WEIGHT slots (bp_mask tiles) are not model parameters."""
+        shape = self._parse_shape(shape_str)
+        if "bp_mask" in var_name or (shape is not None and shape == (64, 128, 1, 1)):
+            return SemanticTensorInfo(
+                semantic_name=var_name,
+                category=self.CATEGORY_RUNTIME,
+                layer_index=-1,
+                component="compiler_mask",
+                description="Compiler broadcast / attention mask tile",
+                shape_description=shape_str,
+            )
+        return super()._map_weight_tensor(var_name, shape_str)
+
     def _build_index_maps(self, tensors: List[Dict]) -> None:
-        kv_ordered: list[str] = []
         groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
 
         for t in tensors:
@@ -713,33 +1023,13 @@ class QwenMoENameMapper(LLaMANameMapper):
             idx = _input_index(var_name)
             if idx is None:
                 continue
-            shape = parse_shape(shape_str)
-            if shape and is_kv_cache_shape(shape):
-                kv_ordered.append(var_name)
             groups[shape_str].append((idx, var_name))
-
-        kv_ordered.sort(key=lambda name: _input_index(name) or 0)
-        for pos, name in enumerate(kv_ordered):
-            self._kv_slots[name] = (pos // 2, (pos % 2) == 0)
 
         self._layer_groups = {
             shape_str: [name for _, name in sorted(entries, key=lambda item: item[0])]
             for shape_str, entries in groups.items()
         }
-
-    def _layer_index_in_group(self, var_name: str, shape_str: str) -> int:
-        group = self._layer_groups.get(shape_str, [])
-        if var_name not in group:
-            return -1
-        pos = group.index(var_name)
-        n = len(group)
-        if n == self.n_layers:
-            return pos
-        if n == 2 * self.n_layers:
-            return pos // 2
-        if n == self.n_layers * 2 and pos < self.n_layers:
-            return pos
-        return -1
+        self._build_kv_slots(tensors)
 
     def _map_input_tensor(self, idx: int, var_name: str, shape_str: str) -> SemanticTensorInfo:
         shape = self._parse_shape(shape_str)
@@ -831,6 +1121,21 @@ class QwenMoENameMapper(LLaMANameMapper):
                 shape_description="(vocab_size/tp, hidden_size)",
             )
 
+        if len(shape) == 1 and shape[0] == self.hidden_size:
+            if self._is_final_norm_slot(var_name, shape_str):
+                return self._final_norm_info(shape_str)
+            layer_idx = self._layer_index_in_group(var_name, shape_str)
+            if layer_idx >= 0:
+                return SemanticTensorInfo(
+                    semantic_name=f"layer_{layer_idx}.norm.weight",
+                    category=self.CATEGORY_NORM,
+                    layer_index=layer_idx,
+                    component="norm",
+                    description=f"Layer {layer_idx} normalization weight",
+                    shape_description="(hidden_size,)",
+                )
+            return None
+
         layer_idx = self._layer_index_in_group(var_name, shape_str)
         if layer_idx < 0:
             return None
@@ -847,7 +1152,8 @@ class QwenMoENameMapper(LLaMANameMapper):
         if (
             len(shape) == 3
             and shape[0] == self.num_experts
-            and shape[2] == self.hidden_size
+            and shape[1] == self.hidden_size
+            and shape[2] != self.hidden_size
         ):
             return SemanticTensorInfo(
                 semantic_name=f"layer_{layer_idx}.moe.expert.gate_up.weight",
@@ -855,12 +1161,13 @@ class QwenMoENameMapper(LLaMANameMapper):
                 layer_index=layer_idx,
                 component="moe_expert_gate_up",
                 description=f"Layer {layer_idx} expert gate+up (packed)",
-                shape_description="(num_experts, intermediate/tp, hidden_size)",
+                shape_description="(num_experts, hidden_size, 2*intermediate[/tp])",
             )
         if (
             len(shape) == 3
             and shape[0] == self.num_experts
-            and shape[1] == self.hidden_size
+            and shape[2] == self.hidden_size
+            and shape[1] < shape[2]
         ):
             return SemanticTensorInfo(
                 semantic_name=f"layer_{layer_idx}.moe.expert.down_proj.weight",
@@ -868,20 +1175,34 @@ class QwenMoENameMapper(LLaMANameMapper):
                 layer_index=layer_idx,
                 component="moe_expert_down",
                 description=f"Layer {layer_idx} expert down projection",
-                shape_description="(num_experts, hidden_size, intermediate/tp)",
+                shape_description="(num_experts, intermediate/tp, hidden_size)",
             )
         if len(shape) == 2 and shape == (self.hidden_size, attn_proj):
+            group_size = len(self._layer_groups.get(shape_str, []))
+            if group_size == self.n_layers:
+                return SemanticTensorInfo(
+                    semantic_name=f"layer_{layer_idx}.attention.qkv_proj.weight",
+                    category=self.CATEGORY_ATTENTION,
+                    layer_index=layer_idx,
+                    component="qkv_proj",
+                    description=f"Layer {layer_idx} fused QKV projection",
+                    shape_description="(hidden_size, n_heads*head_dim/tp)",
+                )
+            pos = self._position_in_group(var_name, shape_str)
+            attn_kind = ("attention.wq.weight", "attention.wk.weight", "attention.wv.weight")
+            attn_name = attn_kind[pos % 3] if pos >= 0 else "attention.wq.weight"
             return SemanticTensorInfo(
-                semantic_name=f"layer_{layer_idx}.attention.wq.weight",
+                semantic_name=f"layer_{layer_idx}.{attn_name}",
                 category=self.CATEGORY_ATTENTION,
                 layer_index=layer_idx,
-                component="wq",
-                description=f"Layer {layer_idx} query projection",
+                component=("wq", "wk", "wv")[pos % 3] if pos >= 0 else "wq",
+                description=f"Layer {layer_idx} {'query' if pos % 3 == 0 else 'key' if pos % 3 == 1 else 'value'} projection",
                 shape_description="(hidden_size, n_heads*head_dim/tp)",
             )
         if len(shape) == 2 and shape == (attn_proj, self.hidden_size):
+            shard = self._tp_shard_suffix(var_name, shape_str)
             return SemanticTensorInfo(
-                semantic_name=f"layer_{layer_idx}.attention.wo.weight",
+                semantic_name=f"layer_{layer_idx}.attention.wo.weight{shard}",
                 category=self.CATEGORY_ATTENTION,
                 layer_index=layer_idx,
                 component="wo",
@@ -889,17 +1210,26 @@ class QwenMoENameMapper(LLaMANameMapper):
                 shape_description="(n_heads*head_dim/tp, hidden_size)",
             )
         if len(shape) == 2 and shape == (self.hidden_size, self.moe_intermediate_size):
+            pos = self._position_in_group(var_name, shape_str)
+            shared_kind = ("mlp.shared.gate_proj.weight", "mlp.shared.up_proj.weight")
+            shared_name = shared_kind[pos % 2] if pos >= 0 else "mlp.shared.gate_proj.weight"
             return SemanticTensorInfo(
-                semantic_name=f"layer_{layer_idx}.mlp.shared.gate_proj.weight",
+                semantic_name=f"layer_{layer_idx}.{shared_name}",
                 category=self.CATEGORY_MLP,
                 layer_index=layer_idx,
-                component="shared_gate_proj",
-                description=f"Layer {layer_idx} shared expert gate projection",
+                component="shared_gate_proj" if pos % 2 == 0 else "shared_up_proj",
+                description=f"Layer {layer_idx} shared expert {'gate' if pos % 2 == 0 else 'up'} projection",
                 shape_description="(hidden_size, moe_intermediate)",
             )
         if len(shape) == 2 and shape == (self.moe_intermediate_size, self.hidden_size):
+            pos = self._position_in_group(var_name, shape_str)
+            if pos >= 0 and len(self._layer_groups.get(shape_str, [])) == 2 * self.n_layers:
+                suffix = ("mlp.shared.down_proj.weight", "mlp.shared.down_proj.buffer")
+                name = suffix[pos % 2]
+            else:
+                name = "mlp.shared.down_proj.weight"
             return SemanticTensorInfo(
-                semantic_name=f"layer_{layer_idx}.mlp.shared.down_proj.weight",
+                semantic_name=f"layer_{layer_idx}.{name}",
                 category=self.CATEGORY_MLP,
                 layer_index=layer_idx,
                 component="shared_down_proj",
@@ -915,18 +1245,10 @@ class QwenMoENameMapper(LLaMANameMapper):
                 description=f"Layer {layer_idx} input RMSNorm",
                 shape_description="(hidden_size/tp,)",
             )
-        if len(shape) == 1 and shape[0] == self.hidden_size:
-            return SemanticTensorInfo(
-                semantic_name=f"layer_{layer_idx}.norm.weight",
-                category=self.CATEGORY_NORM,
-                layer_index=layer_idx,
-                component="norm",
-                description=f"Layer {layer_idx} normalization weight",
-                shape_description="(hidden_size,)",
-            )
         if len(shape) == 1 and shape[0] == attn_proj:
+            shard = self._tp_shard_suffix(var_name, shape_str)
             return SemanticTensorInfo(
-                semantic_name=f"layer_{layer_idx}.attention.bias",
+                semantic_name=f"layer_{layer_idx}.attention.bias{shard}",
                 category=self.CATEGORY_ATTENTION,
                 layer_index=layer_idx,
                 component="attention_bias",
@@ -959,7 +1281,10 @@ def _looks_like_qwen_moe_graph(tensors: List[Dict]) -> bool:
             expert_2d += 1
         if len(shape) == 3 and _is_plausible_expert_count(shape[0]) and shape[2] >= 512:
             expert_2d += 1
-    return bhsd_kv >= 4 or expert_2d >= 12
+    # bhsd KV alone is insufficient — Llama decode also uses bhsd [1 2 256 64].
+    if expert_2d >= 12:
+        return True
+    return expert_2d >= 2 and bhsd_kv >= 4
 
 
 def create_mapper_for_tensors(tensors: List[Dict]) -> NameMapper:
@@ -989,9 +1314,10 @@ def mapper_category_to_sim(category: str, *, neff_type: str = "") -> TensorCateg
         LLaMANameMapper.CATEGORY_EMBEDDING,
         LLaMANameMapper.CATEGORY_NORM,
         LLaMANameMapper.CATEGORY_WEIGHT,
+        LLaMANameMapper.CATEGORY_OUTPUT,
     ):
         return TensorCategory.WEIGHT
-    if category in (LLaMANameMapper.CATEGORY_RUNTIME, LLaMANameMapper.CATEGORY_OUTPUT):
+    if category == LLaMANameMapper.CATEGORY_RUNTIME:
         return TensorCategory.ACTIVATION
     if neff_type == "WEIGHT" and category != LLaMANameMapper.CATEGORY_UNKNOWN:
         return TensorCategory.WEIGHT
@@ -1014,7 +1340,10 @@ class CatalogEntry:
 
     @property
     def tensor_id(self) -> str:
-        return _slugify(self.semantic_name or self.variable_name)
+        slug = _slugify(self.semantic_name or self.variable_name)
+        if _INPUT_INDEX_RE.match(self.variable_name) or re.fullmatch(r"output\d+", self.variable_name):
+            return _slugify(f"{slug}_{self.variable_name}")
+        return slug
 
 
 class NeffTensorCatalog:
@@ -1079,11 +1408,58 @@ class NeffTensorCatalog:
         if variable in self.by_variable:
             return self.by_variable[variable]
 
+        if "," in variable:
+            for part in (piece.strip() for piece in variable.split(",")):
+                if part in self.by_variable:
+                    base = self.by_variable[part]
+                    return CatalogEntry(
+                        variable_name=variable,
+                        semantic_name=base.semantic_name,
+                        category=base.category,
+                        bytes=max(transfer_bytes, base.bytes),
+                        neff_type=base.neff_type,
+                        shape=base.shape,
+                    )
+
+        lower = variable.lower()
+        if "coalesced_memloc" in lower:
+            return CatalogEntry(
+                variable_name=variable,
+                semantic_name=variable,
+                category=TensorCategory.ACTIVATION,
+                bytes=transfer_bytes,
+                neff_type="IN",
+                shape="",
+            )
+
+        if any(token in lower for token in ("get_tuple_element", "all_gather", "all_reduce")):
+            return CatalogEntry(
+                variable_name=variable,
+                semantic_name=variable,
+                category=TensorCategory.ACTIVATION,
+                bytes=transfer_bytes,
+                neff_type="IN",
+                shape="",
+            )
+
         if re.fullmatch(r"input\d+", variable) or re.fullmatch(r"output\d+", variable):
             return self.by_variable.get(variable)
 
         route_weight = "WEIGHT" in src.upper()
         if route_weight:
+            weight_candidates = [
+                c for c in self.by_size.get(transfer_bytes, []) if c.neff_type == "WEIGHT"
+            ]
+            if len(weight_candidates) == 1:
+                base = weight_candidates[0]
+                return CatalogEntry(
+                    variable_name=variable,
+                    semantic_name=base.semantic_name,
+                    category=base.category,
+                    bytes=max(transfer_bytes, base.bytes),
+                    neff_type=base.neff_type,
+                    shape=base.shape,
+                )
             return CatalogEntry(
                 variable_name=variable,
                 semantic_name=variable,
@@ -1091,17 +1467,6 @@ class NeffTensorCatalog:
                 bytes=transfer_bytes,
                 neff_type="WEIGHT",
                 shape="",
-            )
-
-        shape_category = _category_from_dma_shape(read_shape)
-        if shape_category is not None:
-            return CatalogEntry(
-                variable_name=variable,
-                semantic_name=variable,
-                category=shape_category,
-                bytes=transfer_bytes,
-                neff_type="IN",
-                shape=str(read_shape),
             )
 
         candidates = self.by_size.get(transfer_bytes, [])
@@ -1115,7 +1480,6 @@ class NeffTensorCatalog:
                 neff_type=base.neff_type,
                 shape=base.shape,
             )
-
         if len(candidates) > 1:
             picked = _pick_ambiguous(candidates, src=src, dst=dst)
             if picked:
@@ -1128,7 +1492,18 @@ class NeffTensorCatalog:
                     shape=picked.shape,
                 )
 
-        info = self._mapper.map_tensor(variable, "", "WEIGHT" if route_weight else "IN")
+        shape_category = _category_from_dma_shape(read_shape)
+        if shape_category is not None:
+            return CatalogEntry(
+                variable_name=variable,
+                semantic_name=variable,
+                category=shape_category,
+                bytes=transfer_bytes,
+                neff_type="IN",
+                shape=str(read_shape),
+            )
+
+        info = self._mapper.map_tensor(variable, "", "IN")
         return CatalogEntry(
             variable_name=variable,
             semantic_name=info.semantic_name,
@@ -1153,6 +1528,10 @@ def _category_from_dma_shape(read_shape: object) -> TensorCategory | None:
                 except (TypeError, ValueError):
                     pass
     if is_kv_cache_shape(tuple(dims)):
+        return TensorCategory.KV_CACHE
+    if is_nxdi_workspace_shape(tuple(dims)):
+        return TensorCategory.KV_CACHE
+    if is_nxdi_kv_tile_shape(tuple(dims)) is not None:
         return TensorCategory.KV_CACHE
     if len(dims) == 2 and dims[0] > 1000:
         return TensorCategory.WEIGHT

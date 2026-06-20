@@ -2,7 +2,7 @@
   "sweep_kind": "stram",
   "technology": "edram_3t",
   "trace": "chip_cores_0_1_2_3",
-  "trace_path": "data/traces/llama32_1b_decode_4core_min1_no_unknown.json",
+  "trace_path": "data/traces/llama32_1b_decode_4core_dge_kv.json",
   "baseline": {
     "hierarchy": "configs/hierarchy/trainium2_baseline.yaml",
     "policy": "configs/policies/baseline_hbm.yaml"
@@ -30,29 +30,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_10pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4490971.442889224,
-          "pct_change": 0.0
+          "baseline": 4490743.70485444,
+          "candidate": 4490050.887637052,
+          "pct_change": -0.01542767218354642
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17522481597203.854,
-          "pct_change": 0.0
+          "baseline": 17711183163512.21,
+          "candidate": 17715136034578.64,
+          "pct_change": 0.022318503681748467
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 26179636,
-          "pct_change": 0.0
+          "baseline": 26159910,
+          "candidate": 26065522,
+          "pct_change": -0.3608116388779625
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 26065522,
+          "pct_change": -0.3608116388779625
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_10pct_sbuf_edram_3t",
-        "total_time_ns": 4490971.442889224,
-        "total_energy_pJ": 17522481597203.854,
-        "hbm_traffic_bytes": 26179636,
+        "total_time_ns": 4490050.887637052,
+        "total_energy_pJ": 17715136034578.64,
+        "hbm_traffic_bytes": 26065522,
+        "cross_domain_traffic_bytes": 26065522,
         "transfers_by_hop": {
-          "hbm->sbuf": 4070,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 4023,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 8
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_10pct_best_case.json"
@@ -65,29 +72,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_10pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4490971.442889224,
-          "pct_change": 0.0
+          "baseline": 4490743.70485444,
+          "candidate": 4490050.887637052,
+          "pct_change": -0.01542767218354642
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17522481597203.854,
-          "pct_change": 0.0
+          "baseline": 17711183163512.21,
+          "candidate": 17715136034578.64,
+          "pct_change": 0.022318503681748467
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 26179636,
-          "pct_change": 0.0
+          "baseline": 26159910,
+          "candidate": 26065522,
+          "pct_change": -0.3608116388779625
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 26065522,
+          "pct_change": -0.3608116388779625
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_10pct_sbuf_edram_3t",
-        "total_time_ns": 4490971.442889224,
-        "total_energy_pJ": 17522481597203.854,
-        "hbm_traffic_bytes": 26179636,
+        "total_time_ns": 4490050.887637052,
+        "total_energy_pJ": 17715136034578.64,
+        "hbm_traffic_bytes": 26065522,
+        "cross_domain_traffic_bytes": 26065522,
         "transfers_by_hop": {
-          "hbm->sbuf": 4070,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 4023,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 8
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_10pct_worst_case.json"
@@ -100,29 +114,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_25pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4492405.851410968,
-          "pct_change": 0.03193982727313023
+          "baseline": 4490743.70485444,
+          "candidate": 4489639.385654453,
+          "pct_change": -0.024591009252944006
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17545943886736.502,
-          "pct_change": 0.1338982118628244
+          "baseline": 17711183163512.21,
+          "candidate": 17740437673314.816,
+          "pct_change": 0.16517535577676315
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 26040368,
-          "pct_change": -0.5319707271713022
+          "baseline": 26159910,
+          "candidate": 25516630,
+          "pct_change": -2.4590298666929664
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 25516630,
+          "pct_change": -2.4590298666929664
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_25pct_sbuf_edram_3t",
-        "total_time_ns": 4492405.851410968,
-        "total_energy_pJ": 17545943886736.502,
-        "hbm_traffic_bytes": 26040368,
+        "total_time_ns": 4489639.385654453,
+        "total_energy_pJ": 17740437673314.816,
+        "hbm_traffic_bytes": 25516630,
+        "cross_domain_traffic_bytes": 25516630,
         "transfers_by_hop": {
-          "hbm->sbuf": 4052,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 3949,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 8
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_25pct_best_case.json"
@@ -135,29 +156,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_25pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4492405.851410968,
-          "pct_change": 0.03193982727313023
+          "baseline": 4490743.70485444,
+          "candidate": 4489639.385654453,
+          "pct_change": -0.024591009252944006
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17545943886736.502,
-          "pct_change": 0.1338982118628244
+          "baseline": 17711183163512.21,
+          "candidate": 17740437673314.816,
+          "pct_change": 0.16517535577676315
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 26040368,
-          "pct_change": -0.5319707271713022
+          "baseline": 26159910,
+          "candidate": 25516630,
+          "pct_change": -2.4590298666929664
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 25516630,
+          "pct_change": -2.4590298666929664
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_25pct_sbuf_edram_3t",
-        "total_time_ns": 4492405.851410968,
-        "total_energy_pJ": 17545943886736.502,
-        "hbm_traffic_bytes": 26040368,
+        "total_time_ns": 4489639.385654453,
+        "total_energy_pJ": 17740437673314.816,
+        "hbm_traffic_bytes": 25516630,
+        "cross_domain_traffic_bytes": 25516630,
         "transfers_by_hop": {
-          "hbm->sbuf": 4052,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 3949,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 8
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_25pct_worst_case.json"
@@ -170,29 +198,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_50pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4490587.420150099,
-          "pct_change": -0.008550994901838587
+          "baseline": 4490743.70485444,
+          "candidate": 4490211.94415881,
+          "pct_change": -0.011841261282734222
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17569387149694.3,
-          "pct_change": 0.2676878399343402
+          "baseline": 17711183163512.21,
+          "candidate": 17765749339336.605,
+          "pct_change": 0.30808882343224436
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 25294840,
-          "pct_change": -3.379710856178444
+          "baseline": 26159910,
+          "candidate": 25287246,
+          "pct_change": -3.3358830362948497
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 25287246,
+          "pct_change": -3.3358830362948497
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_50pct_sbuf_edram_3t",
-        "total_time_ns": 4490587.420150099,
-        "total_energy_pJ": 17569387149694.3,
-        "hbm_traffic_bytes": 25294840,
+        "total_time_ns": 4490211.94415881,
+        "total_energy_pJ": 17765749339336.605,
+        "hbm_traffic_bytes": 25287246,
+        "cross_domain_traffic_bytes": 25287246,
         "transfers_by_hop": {
-          "hbm->sbuf": 3947,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 3919,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 8
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_50pct_best_case.json"
@@ -205,29 +240,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_50pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4490587.420150099,
-          "pct_change": -0.008550994901838587
+          "baseline": 4490743.70485444,
+          "candidate": 4490211.94415881,
+          "pct_change": -0.011841261282734222
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17569387149694.3,
-          "pct_change": 0.2676878399343402
+          "baseline": 17711183163512.21,
+          "candidate": 17765749339336.605,
+          "pct_change": 0.30808882343224436
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 25294840,
-          "pct_change": -3.379710856178444
+          "baseline": 26159910,
+          "candidate": 25287246,
+          "pct_change": -3.3358830362948497
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 25287246,
+          "pct_change": -3.3358830362948497
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_50pct_sbuf_edram_3t",
-        "total_time_ns": 4490587.420150099,
-        "total_energy_pJ": 17569387149694.3,
-        "hbm_traffic_bytes": 25294840,
+        "total_time_ns": 4490211.94415881,
+        "total_energy_pJ": 17765749339336.605,
+        "hbm_traffic_bytes": 25287246,
+        "cross_domain_traffic_bytes": 25287246,
         "transfers_by_hop": {
-          "hbm->sbuf": 3947,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 3919,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 8
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_50pct_worst_case.json"
@@ -240,29 +282,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_75pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4492975.761480548,
-          "pct_change": 0.04462995627589992
+          "baseline": 4490743.70485444,
+          "candidate": 4490809.872854475,
+          "pct_change": 0.0014734307808183557
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17617774794583.918,
-          "pct_change": 0.5438339133155138
+          "baseline": 17711183163512.21,
+          "candidate": 17795013623146.66,
+          "pct_change": 0.47331936472292263
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 24901580,
-          "pct_change": -4.8818707792575875
+          "baseline": 26159910,
+          "candidate": 24955406,
+          "pct_change": -4.604388929472616
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 24955406,
+          "pct_change": -4.604388929472616
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_75pct_sbuf_edram_3t",
-        "total_time_ns": 4492975.761480548,
-        "total_energy_pJ": 17617774794583.918,
-        "hbm_traffic_bytes": 24901580,
+        "total_time_ns": 4490809.872854475,
+        "total_energy_pJ": 17795013623146.66,
+        "hbm_traffic_bytes": 24955406,
+        "cross_domain_traffic_bytes": 24955406,
         "transfers_by_hop": {
-          "hbm->sbuf": 3886,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 3854,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 16
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_75pct_best_case.json"
@@ -275,29 +324,36 @@
         "baseline": "trainium2_baseline",
         "candidate": "trainium2_stram_75pct_sbuf_edram_3t",
         "time_ns": {
-          "baseline": 4490971.442889224,
-          "candidate": 4492975.761480548,
-          "pct_change": 0.04462995627589992
+          "baseline": 4490743.70485444,
+          "candidate": 4490809.872854475,
+          "pct_change": 0.0014734307808183557
         },
         "energy_pJ": {
-          "baseline": 17522481597203.854,
-          "candidate": 17617774794583.918,
-          "pct_change": 0.5438339133155138
+          "baseline": 17711183163512.21,
+          "candidate": 17795013623146.66,
+          "pct_change": 0.47331936472292263
         },
         "hbm_traffic_bytes": {
-          "baseline": 26179636,
-          "candidate": 24901580,
-          "pct_change": -4.8818707792575875
+          "baseline": 26159910,
+          "candidate": 24955406,
+          "pct_change": -4.604388929472616
+        },
+        "cross_domain_traffic_bytes": {
+          "baseline": 26159910,
+          "candidate": 24955406,
+          "pct_change": -4.604388929472616
         }
       },
       "candidate": {
         "hierarchy_name": "trainium2_stram_75pct_sbuf_edram_3t",
-        "total_time_ns": 4492975.761480548,
-        "total_energy_pJ": 17617774794583.918,
-        "hbm_traffic_bytes": 24901580,
+        "total_time_ns": 4490809.872854475,
+        "total_energy_pJ": 17795013623146.66,
+        "hbm_traffic_bytes": 24955406,
+        "cross_domain_traffic_bytes": 24955406,
         "transfers_by_hop": {
-          "hbm->sbuf": 3886,
-          "sbuf->hbm": 134396
+          "hbm->sbuf": 3854,
+          "sbuf->hbm": 134396,
+          "stram->sbuf": 16
         }
       },
       "per_run_json": "data/traces/memory_sweeps/runs/compare_stram_edram_3t_75pct_worst_case.json"

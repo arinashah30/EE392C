@@ -21,7 +21,9 @@ from dmsim.trace.schema import Trace, load_trace  # noqa: E402
 FRACTIONS_PCT = (10, 25, 50, 75)
 SPILL_ORDERS = ("best_case", "worst_case")
 
-TRACE_DEFAULT = "data/traces/llama32_1b_decode_4core_min1_no_unknown.json"
+LLAMA_TRACE_DEFAULT = "data/traces/llama32_1b_decode_4core_dge_kv.json"
+QWEN_TRACE_DEFAULT = "data/traces/qwen1_5_moe_decode_4core_dge_v2.json"
+TRACE_DEFAULT = LLAMA_TRACE_DEFAULT
 BASELINE_HIERARCHY = "configs/hierarchy/trainium2_baseline.yaml"
 BASELINE_POLICY = "configs/policies/baseline_hbm.yaml"
 GENERATED_DIR = REPO_ROOT / "configs/hierarchy/generated"
@@ -203,6 +205,7 @@ def run_tier_tech_sweep(
     trace: Trace,
     *,
     root: Path,
+    trace_path: Path,
     fractions_pct: tuple[int, ...] = FRACTIONS_PCT,
     spill_orders: tuple[str, ...] = SPILL_ORDERS,
     write_hierarchies: bool = True,
@@ -289,11 +292,16 @@ def run_tier_tech_sweep(
                     f"off_chip_if {c['cross_domain_traffic_bytes']['pct_change']:+.2f}%"
                 )
 
+    trace_path_str = (
+        str(trace_path.relative_to(root))
+        if trace_path.is_relative_to(root)
+        else str(trace_path)
+    )
     return {
         "sweep_kind": tier,
         "technology": tech,
         "trace": str(trace.metadata.workload),
-        "trace_path": TRACE_DEFAULT,
+        "trace_path": trace_path_str,
         "baseline": {
             "hierarchy": BASELINE_HIERARCHY,
             "policy": BASELINE_POLICY,
@@ -371,6 +379,7 @@ def main() -> None:
             tech,
             trace,
             root=root,
+            trace_path=trace_path,
             fractions_pct=fractions_pct,
             write_hierarchies=write_hiers,
             per_run_dir=per_run_dir,

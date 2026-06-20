@@ -12,6 +12,7 @@
 #
 # Usage:
 #   ./capture_and_export.sh
+#   ENABLE_DGE_NOTIFS=0 ./capture_and_export.sh   # disable if NRT overflow / timeout
 #   PROMPT="..." ./capture_and_export.sh
 #   COMPILE=1 ./capture_and_export.sh          # compile to /dev/shm then profile
 #   SKIP_RUN=1 ./capture_and_export.sh       # re-export from existing NTFFs
@@ -51,10 +52,9 @@ export NEURON_RT_INSPECT_DEVICE_PROFILE=1
 export NEURON_RT_INSPECT_OUTPUT_DIR="$OUT"
 # Do not set NEURON_RT_INSPECT_EVENT_FILTER_NC — capture all NeuronCores (0–3).
 
-# Richer dynamic-DMA metadata (tensor/source/dest in dma[]). Off by default: heavy DGE
-# workloads can hit NRT_EXEC_SW_NQ_OVERFLOW / execution timeout. See profile warnings[].
-#   ENABLE_DGE_NOTIFS=1 ./capture_and_export.sh
-if [[ "${ENABLE_DGE_NOTIFS:-0}" == "1" ]]; then
+# Richer dynamic-DMA metadata (tensor names / routes in dma[]). On by default for ingest;
+# may cause NRT_EXEC_SW_NQ_OVERFLOW on some runs — set ENABLE_DGE_NOTIFS=0 to disable.
+if [[ "${ENABLE_DGE_NOTIFS:-1}" == "1" ]]; then
     export NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1
 fi
 
@@ -68,6 +68,7 @@ echo "  PROMPT     = $PROMPT"
 echo "  OUT        = $OUT"
 echo "  LNC        = $LNC  (logical cores = $((4 / LNC)) on trn2.3xlarge)"
 echo "  TP_DEGREE  = $TP_DEGREE"
+echo "  DGE_NOTIFS = ${ENABLE_DGE_NOTIFS:-1}"
 echo
 
 if [[ "${COMPILE:-0}" == "1" ]]; then
@@ -124,7 +125,7 @@ neuron-explorer view \
     --output-file "$OUT/profile.json" \
     --json-pretty-print
 
-NC_JSON_COUNT=$(find "$OUT" -maxdepth 1 -name '*_nc_*_session_*.json' 2>/dev/null | wc -l)
+NC_JSON_COUNT=$(find "$OUT" -maxdepth 1 -name '*_nc_*_model_*.json' 2>/dev/null | wc -l)
 echo "      per-core JSON files = $NC_JSON_COUNT (expect 4 for TP=4)"
 if [[ "$NC_JSON_COUNT" -lt 4 ]]; then
     echo "[warn] fewer than 4 per-core JSON exports — check NTFF count and LNC/TP settings" >&2
@@ -134,7 +135,7 @@ echo
 echo "[done] artifacts under $OUT:"
 echo "  NTFFs:       $SESSION_DIR/*_vnc_*.ntff"
 echo "  System JSON: $OUT/profile.json"
-echo "  Device JSON: $OUT/*_nc_*_session_*.json"
+echo "  Device JSON: $OUT/*_nc_*_model_*.json"
 echo
 echo "Ingest with dmsim:"
 echo "  dmsim ingest --profile-dir $OUT --output data/traces/llama32_1b_ingested.json"

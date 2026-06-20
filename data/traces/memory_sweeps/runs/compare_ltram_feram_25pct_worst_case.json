@@ -3,19 +3,24 @@
     "baseline": "trainium2_baseline",
     "candidate": "trainium2_ltram_25pct_hbm_feram",
     "time_ns": {
-      "baseline": 4490971.442889224,
-      "candidate": 4475791.046967476,
-      "pct_change": -0.3380203173142862
+      "baseline": 4490743.70485444,
+      "candidate": 4474362.504854433,
+      "pct_change": -0.36477699634247274
     },
     "energy_pJ": {
-      "baseline": 17522481597203.854,
-      "candidate": 13391784579799.32,
-      "pct_change": -23.573698705231845
+      "baseline": 17711183163512.21,
+      "candidate": 13295109195533.912,
+      "pct_change": -24.933816827529046
     },
     "hbm_traffic_bytes": {
-      "baseline": 26179636,
-      "candidate": 24091360,
-      "pct_change": -7.976719004038101
+      "baseline": 26159910,
+      "candidate": 23682646,
+      "pct_change": -9.469696187792694
+    },
+    "cross_domain_traffic_bytes": {
+      "baseline": 26159910,
+      "candidate": 26159910,
+      "pct_change": 0.0
     }
   },
   "baseline": {
@@ -110,14 +115,14 @@
       },
       "trace": {
         "workload": "chip_cores_0_1_2_3",
-        "source": "neuron_json:new_llama_trace",
+        "source": "neuron_json:llama_profile_dge_only",
         "neuron_core_ids": [
           0,
           1,
           2,
           3
         ],
-        "num_tensors": 1236,
+        "num_tensors": 1240,
         "num_events": 612144
       },
       "hierarchy_yaml": {
@@ -186,32 +191,34 @@
       "hierarchy_name": "trainium2_baseline",
       "policy_name": "baseline_hbm",
       "trace_workload": "chip_cores_0_1_2_3",
-      "total_time_ns": 4490971.442889224,
-      "total_energy_pJ": 17522481597203.854,
+      "total_time_ns": 4490743.70485444,
+      "total_energy_pJ": 17711183163512.21,
       "time_by_core_ns": {
-        "0": 4490971.442889224,
-        "3": 4490713.646967481,
-        "1": 4485254.058723996,
-        "2": 4488362.022645744
+        "1": 4486325.101923995,
+        "3": 4488350.98673269,
+        "0": 4490743.70485444,
+        "2": 4488604.710654437
       },
-      "hbm_read_bytes": 23416580,
+      "hbm_read_bytes": 23396854,
       "hbm_write_bytes": 2763056,
+      "cross_domain_read_bytes": 23396854,
+      "cross_domain_write_bytes": 2763056,
       "kernel_wipes": 5736,
-      "refresh_energy_pJ": 17521205679619.193,
+      "refresh_energy_pJ": 17709907864896.004,
       "refresh_cycles_by_level": {
-        "hbm": 93
+        "hbm": 94
       },
       "transfers_by_hop": {
-        "hbm->sbuf": 4070,
+        "hbm->sbuf": 4060,
         "sbuf->hbm": 134396
       },
       "energy_by_level_pJ": {
-        "hbm": 17521617428561.94,
-        "sbuf": 864168549.7360096
+        "hbm": 17710319303400.43,
+        "sbuf": 863860017.4120215
       },
       "latency_by_level_ns": {
-        "hbm": 8550301.435378797,
-        "sbuf": 9404999.735762607
+        "hbm": 8549659.700748358,
+        "sbuf": 9404364.803332463
       }
     }
   },
@@ -323,14 +330,14 @@
       },
       "trace": {
         "workload": "chip_cores_0_1_2_3",
-        "source": "neuron_json:new_llama_trace",
+        "source": "neuron_json:llama_profile_dge_only",
         "neuron_core_ids": [
           0,
           1,
           2,
           3
         ],
-        "num_tensors": 1236,
+        "num_tensors": 1240,
         "num_events": 612144
       },
       "hierarchy_yaml": {
@@ -403,35 +410,37 @@
       "hierarchy_name": "trainium2_ltram_25pct_hbm_feram",
       "policy_name": "decode_ltram_only",
       "trace_workload": "chip_cores_0_1_2_3",
-      "total_time_ns": 4475791.046967476,
-      "total_energy_pJ": 13391784579799.32,
+      "total_time_ns": 4474362.504854433,
+      "total_energy_pJ": 13295109195533.912,
       "time_by_core_ns": {
-        "0": 4473917.042889216,
-        "3": 4475791.046967476,
-        "1": 4470668.058723996,
-        "2": 4473439.4226457365
+        "1": 4472300.1019239975,
+        "3": 4474101.586732692,
+        "0": 4474362.504854433,
+        "2": 4473906.510654435
       },
-      "hbm_read_bytes": 21328304,
+      "hbm_read_bytes": 20919590,
       "hbm_write_bytes": 2763056,
+      "cross_domain_read_bytes": 23396854,
+      "cross_domain_write_bytes": 2763056,
       "kernel_wipes": 5736,
-      "refresh_energy_pJ": 13390565463350.39,
+      "refresh_energy_pJ": 13293901278528.002,
       "refresh_cycles_by_level": {
-        "hbm": 93
+        "hbm": 94
       },
       "transfers_by_hop": {
-        "hbm->sbuf": 3522,
-        "ltram->sbuf": 548,
+        "hbm->sbuf": 3531,
+        "ltram->sbuf": 529,
         "sbuf->hbm": 134396
       },
       "energy_by_level_pJ": {
-        "hbm": 13390944348007.389,
-        "sbuf": 835767996.1359743,
-        "ltram": 4463731.715519985
+        "hbm": 13294273731040.193,
+        "sbuf": 830169227.0119332,
+        "ltram": 5295201.345279992
       },
       "latency_by_level_ns": {
-        "hbm": 8513765.77545734,
-        "sbuf": 9374256.93576282,
-        "ltram": 5792.859921739118
+        "hbm": 8513763.897222547,
+        "sbuf": 9374687.903332612,
+        "ltram": 6218.903526086935
       }
     }
   }

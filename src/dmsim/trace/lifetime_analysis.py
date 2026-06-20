@@ -48,6 +48,22 @@ _BIN_LABELS = {
 }
 
 
+def _kernel_end_cores(
+    event: KernelBoundaryEvent,
+    active_kernels: dict[int, list[tuple[float, int]]],
+) -> list[int]:
+    """Core ids whose ``active_kernels`` list should lose ``event.kernel_id``.
+
+    Mirrors ``engine._kernel_wipe_cores``: ``core_id=None`` clears the kernel on
+    every core that has an active-kernel stack (chip-wide boundary).
+    """
+    if event.core_id is not None:
+        return [event.core_id]
+    if active_kernels:
+        return list(active_kernels.keys())
+    return [0]
+
+
 def classify_lifetime(lifetime_ns: float, trace_span_ns: float) -> LifetimeBin:
     """Assign a tensor to a lifetime bin."""
     if lifetime_ns <= 0:
@@ -135,19 +151,34 @@ def analyze_trace_lifetimes(trace: Trace) -> LifetimeAnalysisResult:
     access_count: dict[str, int] = defaultdict(int)
     tensor_kernels: dict[str, set[int]] = defaultdict(set)
     active_kernels: dict[int, list[tuple[float, int]]] = defaultdict(list)
+    default_target = "sbuf"
+    in_sbuf: dict[int, dict[str, float]] = defaultdict(dict)
+    sbuf_stints: dict[str, list[float]] = defaultdict(list)
 
     event_times: list[float] = []
 
     for event in trace.parsed_events():
         event_times.append(event.t_ns)
         if isinstance(event, KernelBoundaryEvent):
-            core = event.core_id if event.core_id is not None else 0
             if event.type == "kernel_start":
+                core = event.core_id if event.core_id is not None else 0
                 active_kernels[core].append((event.t_ns, event.kernel_id))
             elif event.type == "kernel_end":
-                active_kernels[core] = [
-                    (t, kid) for t, kid in active_kernels[core] if kid != event.kernel_id
-                ]
+                for core in _kernel_end_cores(event, active_kernels):
+                    active_kernels[core] = [
+                        (t, kid)
+                        for t, kid in active_kernels[core]
+                        if kid != event.kernel_id
+                    ]
+                wipe_cores = (
+                    [event.core_id]
+                    if event.core_id is not None
+                    else list(in_sbuf.keys()) or [0]
+                )
+                for core in wipe_cores:
+                    for tid, start_t in list(in_sbuf.get(core, {}).items()):
+                        sbuf_stints[tid].append(event.t_ns - start_t)
+                    in_sbuf[core] = {}
         elif isinstance(event, AccessEvent):
             tid = event.tensor_id
             access_count[tid] += 1
@@ -159,6 +190,11 @@ def analyze_trace_lifetimes(trace: Trace) -> LifetimeAnalysisResult:
                 last_t[tid] = max(last_t[tid], event.t_ns)
             for _, kid in active_kernels.get(event.core_id, []):
                 tensor_kernels[tid].add(kid)
+            target = event.target_level or default_target
+            if event.op == "read" and target == default_target:
+                core = event.core_id
+                if tid not in in_sbuf[core]:
+                    in_sbuf[core][tid] = event.t_ns
 
     if not first_t:
         return LifetimeAnalysisResult(
@@ -177,14 +213,16 @@ def analyze_trace_lifetimes(trace: Trace) -> LifetimeAnalysisResult:
     last_event_t_ns = max(event_times) if event_times else max(last_t.values())
     trace_span_ns = last_event_t_ns - first_event_t_ns
 
-    sbuf_stints = _compute_sbuf_stints(trace, last_event_t_ns)
+    for core, occupants in in_sbuf.items():
+        for tid, start_t in occupants.items():
+            sbuf_stints[tid].append(last_event_t_ns - start_t)
 
     records: list[TensorLifetimeRecord] = []
     for tid in sorted(first_t):
         tensor: TensorRecord | None = tensor_map.get(tid)
         lifetime_ns = last_t[tid] - first_t[tid]
         bin_id = classify_lifetime(lifetime_ns, trace_span_ns)
-        stint_list = sbuf_stints.get(tid, [])
+        stint_list = sbuf_stints.get(tid) or []
         sbuf_total = sum(stint_list)
         records.append(
             TensorLifetimeRecord(
@@ -221,51 +259,6 @@ def analyze_trace_lifetimes(trace: Trace) -> LifetimeAnalysisResult:
         sbuf_category_stats=sbuf_category_stats,
         summary=summary,
     )
-
-
-def _compute_sbuf_stints(trace: Trace, last_event_t_ns: float) -> dict[str, list[float]]:
-    """
-    Per-tensor SBUF residency stints (install on read→sbuf until kernel_end wipe).
-
-    Mirrors dmsim SBUF scratch behavior: data loaded into SBUF stays until the
-    NeuronCore's kernel_end clears fast buffers.
-    """
-    default_target = "sbuf"
-    in_sbuf: dict[int, dict[str, float]] = defaultdict(dict)
-    stints: dict[str, list[float]] = defaultdict(list)
-
-    for event in trace.parsed_events():
-        if isinstance(event, KernelBoundaryEvent):
-            if event.type != "kernel_end":
-                continue
-            cores = (
-                [event.core_id]
-                if event.core_id is not None
-                else list(in_sbuf.keys()) or [0]
-            )
-            for core in cores:
-                for tid, start_t in list(in_sbuf.get(core, {}).items()):
-                    stints[tid].append(event.t_ns - start_t)
-                in_sbuf[core] = {}
-            continue
-
-        if not isinstance(event, AccessEvent):
-            continue
-
-        target = event.target_level or default_target
-        if event.op != "read" or target != default_target:
-            continue
-
-        core = event.core_id
-        tid = event.tensor_id
-        if tid not in in_sbuf[core]:
-            in_sbuf[core][tid] = event.t_ns
-
-    for core, occupants in in_sbuf.items():
-        for tid, start_t in occupants.items():
-            stints[tid].append(last_event_t_ns - start_t)
-
-    return dict(stints)
 
 
 def _aggregate_bin_stats(records: list[TensorLifetimeRecord]) -> list[LifetimeBinStats]:
@@ -381,10 +374,10 @@ def _build_summary(
         {
             "session_lifetime_min_ms": sorted_lt[0] / 1e6,
             "session_lifetime_max_ms": sorted_lt[-1] / 1e6,
-            "session_lifetime_median_ms": percentile(50),
+            "session_lifetime_median_ms": _median(lifetimes) / 1e6,
             "lifetime_min_ms": sorted_lt[0] / 1e6,
             "lifetime_max_ms": sorted_lt[-1] / 1e6,
-            "lifetime_median_ms": percentile(50),
+            "lifetime_median_ms": _median(lifetimes) / 1e6,
             "lifetime_mean_ms": sum(lifetimes) / n / 1e6,
             "lifetime_p10_ms": percentile(10),
             "lifetime_p25_ms": percentile(25),

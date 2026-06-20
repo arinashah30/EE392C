@@ -1,0 +1,464 @@
+{
+  "comparison": {
+    "baseline": "trainium2_baseline",
+    "candidate": "trainium2_diff_mem_25sbuf_50hbm",
+    "time_ns": {
+      "baseline": 6522600.822209638,
+      "candidate": 6502289.735062215,
+      "pct_change": -0.31139552612606997
+    },
+    "energy_pJ": {
+      "baseline": 385876839115424.25,
+      "candidate": 341561685082334.4,
+      "pct_change": -11.484274136451667
+    },
+    "hbm_traffic_bytes": {
+      "baseline": 34826574,
+      "candidate": 31963114,
+      "pct_change": -8.222054802174913
+    },
+    "cross_domain_traffic_bytes": {
+      "baseline": 34826574,
+      "candidate": 34801918,
+      "pct_change": -0.07079651303053812
+    }
+  },
+  "baseline": {
+    "label": "baseline",
+    "configuration": {
+      "hierarchy": {
+        "hierarchy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/hierarchy/trainium2_baseline.yaml",
+        "hierarchy_name": "trainium2_baseline",
+        "instance": {
+          "name": "trn2.3xlarge",
+          "num_chips": 1,
+          "cores_per_chip": 8,
+          "hbm_gib_per_chip": 96.0,
+          "dma_bytes_per_ns_per_engine": 23.0,
+          "dma_engines_per_neuron_core": 16,
+          "dma_cap_transfer_bandwidth": true
+        },
+        "area_budget": {
+          "enabled": false,
+          "nominal_sbuf_bytes_per_core": null,
+          "nominal_hbm_gib_per_chip": null,
+          "sbuf_reference_density_bits_per_um2": 2.44,
+          "hbm_reference_density_bits_per_um2": 1.1,
+          "stram_replaces_sbuf_fraction": 0.0,
+          "ltram_replaces_hbm_fraction": 0.0
+        },
+        "area_budget_notes": {},
+        "levels": [
+          {
+            "id": "psum",
+            "scope": "per_core",
+            "tech": "psum_trainium2",
+            "capacity_bytes": 2097152,
+            "retention_s": null
+          },
+          {
+            "id": "sbuf",
+            "scope": "per_core",
+            "tech": "tsmc_n5_sram",
+            "capacity_bytes": 29360128,
+            "retention_s": null
+          },
+          {
+            "id": "hbm",
+            "scope": "per_chip",
+            "tech": "hbm_trainium2",
+            "capacity_bytes": 103079215104,
+            "retention_s": 0.032
+          }
+        ],
+        "interconnect": {
+          "dma_bandwidth_GBs": 368.0,
+          "on_chip_bandwidth_GBs": 10000.0,
+          "level_domain": {
+            "psum": "on_chip",
+            "sbuf": "on_chip",
+            "stram": "on_chip",
+            "ltram": "off_chip",
+            "hbm": "off_chip"
+          }
+        },
+        "level_interconnect": {
+          "psum": "on_chip",
+          "sbuf": "on_chip",
+          "hbm": "off_chip"
+        },
+        "kernel": {
+          "wipe_levels_on_boundary": [
+            "psum",
+            "sbuf"
+          ]
+        }
+      },
+      "policy": {
+        "policy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/policies/baseline_hbm.yaml",
+        "policy_name": "baseline_hbm",
+        "home_level_by_category": {
+          "weight": "hbm",
+          "kv_cache": "hbm",
+          "hidden": "hbm",
+          "activation": "hbm",
+          "other": "hbm"
+        },
+        "default_access_target": "sbuf",
+        "fallback_by_level": {
+          "psum": "sbuf",
+          "sbuf": "hbm",
+          "stram": "hbm",
+          "ltram": "hbm"
+        },
+        "spill_victim_order": "best_case"
+      },
+      "trace": {
+        "workload": "chip_cores_0_1_2_3",
+        "source": "neuron_json:profile",
+        "neuron_core_ids": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "num_tensors": 3015,
+        "num_events": 1527932
+      },
+      "hierarchy_yaml": {
+        "name": "trainium2_baseline",
+        "description": "Trainium2 per-chip baseline (PSUM + SBUF + HBM only)",
+        "instance": "configs/instances/trn2_3xlarge.yaml",
+        "interconnect": {
+          "dma_bandwidth_GBs": 368,
+          "on_chip_bandwidth_GBs": 10000,
+          "level_domain": {
+            "psum": "on_chip",
+            "sbuf": "on_chip",
+            "stram": "on_chip",
+            "ltram": "off_chip",
+            "hbm": "off_chip"
+          }
+        },
+        "levels": [
+          {
+            "id": "psum",
+            "enabled": true,
+            "tech": "psum_trainium2",
+            "scope": "per_core",
+            "capacity_bytes": 2097152
+          },
+          {
+            "id": "sbuf",
+            "enabled": true,
+            "tech": "tsmc_n22_sram",
+            "scope": "per_core",
+            "capacity_bytes": 29360128
+          },
+          {
+            "id": "stram",
+            "enabled": false,
+            "tech": "edram_1t1c",
+            "scope": "per_core",
+            "capacity_bytes": 0
+          },
+          {
+            "id": "ltram",
+            "enabled": false,
+            "tech": "rram",
+            "scope": "per_chip",
+            "capacity_bytes": 0
+          },
+          {
+            "id": "hbm",
+            "enabled": true,
+            "tech": "hbm_trainium2",
+            "scope": "per_chip"
+          }
+        ],
+        "kernel": {
+          "wipe_levels_on_boundary": [
+            "psum",
+            "sbuf"
+          ]
+        },
+        "area_budget": {
+          "enabled": false
+        }
+      }
+    },
+    "results": {
+      "hierarchy_name": "trainium2_baseline",
+      "policy_name": "baseline_hbm",
+      "trace_workload": "chip_cores_0_1_2_3",
+      "total_time_ns": 6522600.822209638,
+      "total_energy_pJ": 385876839115424.25,
+      "time_by_core_ns": {
+        "0": 6522600.822209638,
+        "1": 6517199.256461916,
+        "2": 6508363.936053364,
+        "3": 6489128.410592707
+      },
+      "hbm_read_bytes": 22984906,
+      "hbm_write_bytes": 11841668,
+      "cross_domain_read_bytes": 22984906,
+      "cross_domain_write_bytes": 11841668,
+      "kernel_wipes": 12064,
+      "refresh_energy_pJ": 385874861692070.3,
+      "refresh_cycles_by_level": {
+        "hbm": 215
+      },
+      "transfers_by_hop": {
+        "hbm->sbuf": 8409,
+        "sbuf->hbm": 186348
+      },
+      "energy_by_level_pJ": {
+        "hbm": 385875408692586.25,
+        "sbuf": 1430424462.0078015
+      },
+      "latency_by_level_ns": {
+        "hbm": 12023569.342717927,
+        "sbuf": 14013723.082510328
+      }
+    }
+  },
+  "candidate": {
+    "label": "candidate",
+    "configuration": {
+      "hierarchy": {
+        "hierarchy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/hierarchy/trainium2_diff_mem_25sbuf_50hbm.yaml",
+        "hierarchy_name": "trainium2_diff_mem_25sbuf_50hbm",
+        "instance": {
+          "name": "trn2.3xlarge",
+          "num_chips": 1,
+          "cores_per_chip": 8,
+          "hbm_gib_per_chip": 96.0,
+          "dma_bytes_per_ns_per_engine": 23.0,
+          "dma_engines_per_neuron_core": 16,
+          "dma_cap_transfer_bandwidth": true
+        },
+        "area_budget": {
+          "enabled": true,
+          "nominal_sbuf_bytes_per_core": 29360128,
+          "nominal_hbm_gib_per_chip": 96.0,
+          "sbuf_reference_density_bits_per_um2": 2.44,
+          "hbm_reference_density_bits_per_um2": 1.1,
+          "stram_replaces_sbuf_fraction": 0.25,
+          "ltram_replaces_hbm_fraction": 0.5
+        },
+        "area_budget_notes": {
+          "sbuf_nominal_per_core": "29360128",
+          "hbm_nominal": "103079215104",
+          "stram_replaces_sbuf_fraction": "0.25",
+          "stram_scope": "per_core",
+          "stram_area_um2": "7291724.3263",
+          "stram_capacity_bytes": "31445561",
+          "sbuf_removed_per_core_bytes": "7340032",
+          "sbuf_capacity_per_core_after": "22020096",
+          "ltram_replaces_hbm_fraction": "0.5",
+          "ltram_area_um2": "428809740.6613",
+          "ltram_capacity_bytes": "3350076098",
+          "hbm_removed_bytes": "51539607552",
+          "hbm_capacity_after": "51539607552"
+        },
+        "levels": [
+          {
+            "id": "psum",
+            "scope": "per_core",
+            "tech": "psum_trainium2",
+            "capacity_bytes": 2097152,
+            "retention_s": null
+          },
+          {
+            "id": "sbuf",
+            "scope": "per_core",
+            "tech": "tsmc_n5_sram",
+            "capacity_bytes": 22020096,
+            "retention_s": null
+          },
+          {
+            "id": "stram",
+            "scope": "per_core",
+            "tech": "edram_1t1c",
+            "capacity_bytes": 31445561,
+            "retention_s": 9e-05
+          },
+          {
+            "id": "ltram",
+            "scope": "per_chip",
+            "tech": "rram",
+            "capacity_bytes": 3350076098,
+            "retention_s": null
+          },
+          {
+            "id": "hbm",
+            "scope": "per_chip",
+            "tech": "hbm_trainium2",
+            "capacity_bytes": 51539607552,
+            "retention_s": 0.032
+          }
+        ],
+        "interconnect": {
+          "dma_bandwidth_GBs": 368.0,
+          "on_chip_bandwidth_GBs": 10000.0,
+          "level_domain": {
+            "psum": "on_chip",
+            "sbuf": "on_chip",
+            "stram": "on_chip",
+            "ltram": "off_chip",
+            "hbm": "off_chip"
+          }
+        },
+        "level_interconnect": {
+          "psum": "on_chip",
+          "sbuf": "on_chip",
+          "stram": "on_chip",
+          "ltram": "off_chip",
+          "hbm": "off_chip"
+        },
+        "kernel": {
+          "wipe_levels_on_boundary": [
+            "psum",
+            "sbuf"
+          ]
+        }
+      },
+      "policy": {
+        "policy_file": "/Users/arinashah/Desktop/EE392C/EE392C/configs/policies/decode_tiered.yaml",
+        "policy_name": "decode_tiered",
+        "home_level_by_category": {
+          "weight": "ltram",
+          "kv_cache": "stram",
+          "hidden": "stram",
+          "activation": "stram",
+          "other": "hbm"
+        },
+        "default_access_target": "sbuf",
+        "fallback_by_level": {
+          "psum": "sbuf",
+          "sbuf": "hbm",
+          "stram": "hbm",
+          "ltram": "hbm"
+        },
+        "spill_victim_order": "best_case"
+      },
+      "trace": {
+        "workload": "chip_cores_0_1_2_3",
+        "source": "neuron_json:profile",
+        "neuron_core_ids": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "num_tensors": 3015,
+        "num_events": 1527932
+      },
+      "hierarchy_yaml": {
+        "name": "trainium2_diff_mem_25sbuf_50hbm",
+        "description": "Capacity heavy \u2014 StRAM 25% of nominal SBUF per core; LtRAM 50% of nominal HBM",
+        "instance": "configs/instances/trn2_3xlarge.yaml",
+        "interconnect": {
+          "dma_bandwidth_GBs": 368,
+          "on_chip_bandwidth_GBs": 10000,
+          "level_domain": {
+            "psum": "on_chip",
+            "sbuf": "on_chip",
+            "stram": "on_chip",
+            "ltram": "off_chip",
+            "hbm": "off_chip"
+          }
+        },
+        "levels": [
+          {
+            "id": "psum",
+            "enabled": true,
+            "tech": "psum_trainium2",
+            "scope": "per_core",
+            "capacity_bytes": 2097152
+          },
+          {
+            "id": "sbuf",
+            "enabled": true,
+            "tech": "tsmc_n22_sram",
+            "scope": "per_core",
+            "capacity_bytes": 29360128
+          },
+          {
+            "id": "stram",
+            "enabled": true,
+            "tech": "edram_1t1c",
+            "scope": "per_core",
+            "capacity_bytes": 0
+          },
+          {
+            "id": "ltram",
+            "enabled": true,
+            "tech": "rram",
+            "scope": "per_chip",
+            "capacity_bytes": 0
+          },
+          {
+            "id": "hbm",
+            "enabled": true,
+            "tech": "hbm_trainium2",
+            "scope": "per_chip"
+          }
+        ],
+        "kernel": {
+          "wipe_levels_on_boundary": [
+            "psum",
+            "sbuf"
+          ]
+        },
+        "area_budget": {
+          "enabled": true,
+          "nominal_sbuf_bytes_per_core": 29360128,
+          "nominal_hbm_gib_per_chip": 96,
+          "stram_replaces_sbuf_fraction": 0.25,
+          "ltram_replaces_hbm_fraction": 0.5
+        }
+      }
+    },
+    "results": {
+      "hierarchy_name": "trainium2_diff_mem_25sbuf_50hbm",
+      "policy_name": "decode_tiered",
+      "trace_workload": "chip_cores_0_1_2_3",
+      "total_time_ns": 6502289.735062215,
+      "total_energy_pJ": 341561685082334.4,
+      "time_by_core_ns": {
+        "0": 6498939.7008101065,
+        "1": 6502289.735062215,
+        "2": 6489976.214653581,
+        "3": 6472648.089192803
+      },
+      "hbm_read_bytes": 20121446,
+      "hbm_write_bytes": 11841668,
+      "cross_domain_read_bytes": 22960250,
+      "cross_domain_write_bytes": 11841668,
+      "kernel_wipes": 12064,
+      "refresh_energy_pJ": 341559781498886.3,
+      "refresh_cycles_by_level": {
+        "stram": 76532,
+        "hbm": 215
+      },
+      "transfers_by_hop": {
+        "hbm->sbuf": 7754,
+        "sbuf->hbm": 186348,
+        "ltram->sbuf": 643
+      },
+      "energy_by_level_pJ": {
+        "stram": 161140229696.0,
+        "hbm": 341399147452584.44,
+        "sbuf": 1391333797.8045266,
+        "ltram": 6068000.32608
+      },
+      "latency_by_level_ns": {
+        "stram": 604.1648000000024,
+        "hbm": 11979400.660566092,
+        "sbuf": 13976523.951710675,
+        "ltram": 7324.962552173958
+      }
+    }
+  }
+}

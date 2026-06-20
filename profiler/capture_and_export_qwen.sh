@@ -151,8 +151,8 @@ neuron-explorer view \
     --output-file "$OUT/profile.json" \
     --json-pretty-print
 
-NC_JSON_COUNT=$(find "$OUT" -maxdepth 1 -name '*_nc_*_session_*.json' 2>/dev/null | wc -l)
-echo "      per-core JSON files = $NC_JSON_COUNT (expect 4 for TP=4)"
+NC_JSON_COUNT=$(find "$OUT" -maxdepth 1 -name '*_nc_*_model_*.json' 2>/dev/null | wc -l)
+echo "      per-core JSON files = $NC_JSON_COUNT (expect 4 for TP=4; 8 if context+decode NEFFs)"
 if [[ "$NC_JSON_COUNT" -lt 4 ]]; then
     echo "[warn] fewer than 4 per-core JSON exports — check NTFF count and LNC/TP settings" >&2
 fi
@@ -161,7 +161,7 @@ echo
 echo "[done] artifacts under $OUT:"
 echo "  NTFFs:       $SESSION_DIR/*_vnc_*.ntff"
 echo "  System JSON: $OUT/profile.json"
-echo "  Device JSON: $OUT/*_nc_*_session_*.json"
+echo "  Device JSON: $OUT/*_nc_*_model_*.json"
 echo
 echo "Ingest with dmsim:"
 echo "  python3 -m dmsim.cli ingest \\"
