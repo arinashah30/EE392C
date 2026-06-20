@@ -64,6 +64,7 @@ M4_CONFIG_COLORS = ["#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa"]
 MILESTONE_BAND_COLORS = ("#eef2ff", "#ecfdf5", "#fff7ed")
 
 HBM_REDUCTION_YLABEL = "HBM traffic reduction from baseline (%)"
+TRAFFIC_REDUCTION_YLABEL = "Traffic reduction from baseline (%)"
 LATENCY_IMPROVEMENT_YLABEL = "Latency improvement from baseline (%)"
 ENERGY_REDUCTION_YLABEL = "Energy reduction from baseline (%)"
 ENERGY_CHANGE_YLABEL = "Energy change from baseline (%)"
@@ -114,15 +115,20 @@ def load_m4(path: Path) -> dict:
     c = data["comparison"]
     hops = data["candidate"]["results"]["transfers_by_hop"]
     hbm_pct = c["hbm_traffic_bytes"]["pct_change"]
+    xd_pct = c["cross_domain_traffic_bytes"]["pct_change"]
     return {
         "hbm_pct": hbm_pct,
         "hbm_reduction_pct": hbm_reduction_from_baseline(hbm_pct),
+        "cross_domain_pct": xd_pct,
+        "cross_domain_reduction_pct": hbm_reduction_from_baseline(xd_pct),
         "time_pct": c["time_ns"]["pct_change"],
         "latency_improvement_pct": improvement_from_baseline(c["time_ns"]["pct_change"]),
         "energy_pct": c["energy_pJ"]["pct_change"],
         "energy_reduction_pct": improvement_from_baseline(c["energy_pJ"]["pct_change"]),
         "hbm_mb": c["hbm_traffic_bytes"]["candidate"] / 1e6,
         "baseline_hbm_mb": c["hbm_traffic_bytes"]["baseline"] / 1e6,
+        "cross_domain_mb": c["cross_domain_traffic_bytes"]["candidate"] / 1e6,
+        "baseline_cross_domain_mb": c["cross_domain_traffic_bytes"]["baseline"] / 1e6,
         "ltram_sbuf": hops.get("ltram->sbuf", 0),
         "stram_sbuf": hops.get("stram->sbuf", 0),
         "hbm_sbuf": hops.get("hbm->sbuf", 0),
@@ -170,6 +176,72 @@ def _plot_sweep_lines(
     reduction = metric in ("hbm_reduction_pct", "latency_improvement_pct") and not signed
     _style_axes(ax, ylabel=ylabel, title=title, reduction=reduction, signed=signed)
     ax.legend(frameon=False, fontsize=8, loc="upper left" if reduction else "best")
+    if reduction:
+        ax.relim()
+        ax.autoscale()
+        _ymin, ymax = ax.get_ylim()
+        ax.set_ylim(0, ymax * 1.08 if ymax > 0 else 1.0)
+
+
+def _grouped_traffic_bars(
+    ax,
+    labels: list[str],
+    llama_hbm: list[float],
+    qwen_hbm: list[float],
+    llama_xd: list[float],
+    qwen_xd: list[float],
+    *,
+    title: str,
+    ylabel: str = TRAFFIC_REDUCTION_YLABEL,
+    show_legend: bool = True,
+    annotate: bool = True,
+    xtick_rotation: float = 0,
+    legend_loc: str = "upper left",
+) -> None:
+    """Grouped bars: HBM (solid) and cross-domain (hatched) for Llama and Qwen."""
+    x = np.arange(len(labels))
+    bar_w = 0.18
+    series = [
+        (-1.5 * bar_w, llama_hbm, LLAMA_COLOR, None, "Llama — HBM"),
+        (-0.5 * bar_w, llama_xd, LLAMA_COLOR, "//", "Llama — cross-domain"),
+        (0.5 * bar_w, qwen_hbm, QWEN_COLOR, None, "Qwen — HBM"),
+        (1.5 * bar_w, qwen_xd, QWEN_COLOR, "//", "Qwen — cross-domain"),
+    ]
+    for offset, vals, color, hatch, label in series:
+        ax.bar(
+            x + offset,
+            vals,
+            bar_w,
+            label=label,
+            color=color,
+            hatch=hatch,
+            edgecolor="#374151",
+            linewidth=0.6,
+        )
+    ax.set_xticks(x)
+    ax.set_xticklabels(
+        labels,
+        rotation=xtick_rotation,
+        ha="right" if xtick_rotation else "center",
+    )
+    _style_axes(ax, ylabel=ylabel, title=title, reduction=True)
+    if show_legend:
+        ax.legend(frameon=False, fontsize=7, loc=legend_loc)
+    if annotate:
+        for offset, vals, *_ in series:
+            for i, val in enumerate(vals):
+                ax.text(
+                    i + offset,
+                    val + 0.4,
+                    _format_bar_label(val),
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
+    ax.relim()
+    ax.autoscale()
+    _ymin, ymax = ax.get_ylim()
+    ax.set_ylim(0, ymax * 1.12 if ymax > 0 else 1.0)
 
 
 def _format_bar_label(val: float) -> str:
@@ -329,6 +401,36 @@ def plot_presentation_m4_dashboard() -> Path:
     )
 
     for ax, (key, ylabel, signed) in zip(axes, metrics):
+        if key == "hbm_reduction_pct":
+            llama_hbm = [
+                load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["hbm_reduction_pct"]
+                for slug, _ in M4_CONFIGS
+            ]
+            qwen_hbm = [
+                load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["hbm_reduction_pct"]
+                for slug, _ in M4_CONFIGS
+            ]
+            llama_xd = [
+                load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["cross_domain_reduction_pct"]
+                for slug, _ in M4_CONFIGS
+            ]
+            qwen_xd = [
+                load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["cross_domain_reduction_pct"]
+                for slug, _ in M4_CONFIGS
+            ]
+            _grouped_traffic_bars(
+                ax,
+                M4_PRESENTATION_LABELS,
+                llama_hbm,
+                qwen_hbm,
+                llama_xd,
+                qwen_xd,
+                title="Traffic reduction",
+                show_legend=False,
+                xtick_rotation=18,
+            )
+            continue
+
         llama_vals = [
             load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")[key]
             for slug, _ in M4_CONFIGS
@@ -362,16 +464,18 @@ def plot_presentation_m4_dashboard() -> Path:
 
     handles = [
         plt.Rectangle((0, 0), 1, 1, color=LLAMA_COLOR),
+        plt.Rectangle((0, 0), 1, 1, facecolor=LLAMA_COLOR, hatch="//", edgecolor="#374151"),
         plt.Rectangle((0, 0), 1, 1, color=QWEN_COLOR),
+        plt.Rectangle((0, 0), 1, 1, facecolor=QWEN_COLOR, hatch="//", edgecolor="#374151"),
     ]
     fig.legend(
         handles,
-        ["Llama 3.2-1B", "Qwen1.5-MoE-A2.7B"],
+        ["Llama — HBM", "Llama — cross-domain", "Qwen — HBM", "Qwen — cross-domain"],
         loc="upper center",
         bbox_to_anchor=(0.5, 0.02),
-        ncol=2,
+        ncol=4,
         frameon=False,
-        fontsize=9,
+        fontsize=8,
     )
 
     fig.subplots_adjust(left=0.06, right=0.99, bottom=0.22, top=0.86, wspace=0.28)
@@ -631,7 +735,7 @@ def plot_m3_ltram_model_compare() -> Path:
 
 
 def plot_m3_ltram_tech_compare() -> Path:
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
     for ax, sweep_dir, model in [
         (axes[0], LLAMA_SWEEP, "Llama 3.2-1B"),
         (axes[1], QWEN_SWEEP, "Qwen1.5-MoE-A2.7B"),
@@ -754,40 +858,32 @@ def plot_m4_best_case_latency() -> Path:
 
 
 def plot_m4_hierarchy() -> Path:
-    llama_vals = []
-    qwen_vals = []
-    labels = []
+    labels = [label for _, label in M4_CONFIGS]
+    llama_hbm = []
+    qwen_hbm = []
+    llama_xd = []
+    qwen_xd = []
 
-    for slug, label in M4_CONFIGS:
-        labels.append(label)
-        llama_vals.append(
-            load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")["hbm_reduction_pct"]
-        )
-        qwen_vals.append(
-            load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")["hbm_reduction_pct"]
-        )
+    for slug, _ in M4_CONFIGS:
+        llama = load_m4(REPO / "results" / f"m4_llama_{slug}_tiered.json")
+        qwen = load_m4(REPO / "results" / "m5_qwen" / f"m4_{slug}_tiered.json")
+        llama_hbm.append(llama["hbm_reduction_pct"])
+        qwen_hbm.append(qwen["hbm_reduction_pct"])
+        llama_xd.append(llama["cross_domain_reduction_pct"])
+        qwen_xd.append(qwen["cross_domain_reduction_pct"])
 
-    x = np.arange(len(labels))
-    width = 0.36
-
-    fig, ax = plt.subplots(figsize=(8.5, 4.5))
-    ax.bar(x - width / 2, llama_vals, width, label="Llama 3.2-1B", color=LLAMA_COLOR)
-    ax.bar(x + width / 2, qwen_vals, width, label="Qwen1.5-MoE-A2.7B", color=QWEN_COLOR)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_xlabel("Full hierarchy design (StRAM fraction / LtRAM fraction)")
-    _style_axes(
+    fig, ax = plt.subplots(figsize=(9.5, 4.8))
+    _grouped_traffic_bars(
         ax,
-        ylabel=HBM_REDUCTION_YLABEL,
+        labels,
+        llama_hbm,
+        qwen_hbm,
+        llama_xd,
+        qwen_xd,
         title="M4 — Full hierarchy configs (`decode_tiered`)",
-        reduction=True,
+        legend_loc="upper right",
     )
-    ax.legend(frameon=False, loc="upper right")
-
-    for i, (lv, qv) in enumerate(zip(llama_vals, qwen_vals)):
-        ax.text(i - width / 2, lv + 0.4, f"{lv:.1f}%", ha="center", va="bottom", fontsize=8)
-        ax.text(i + width / 2, qv + 0.4, f"{qv:.1f}%", ha="center", va="bottom", fontsize=8)
+    ax.set_xlabel("Full hierarchy design (StRAM fraction / LtRAM fraction)")
 
     fig.tight_layout()
     out = OUT_DIR / "m4_hierarchy_hbm_reduction.png"
