@@ -4,6 +4,10 @@ How **dmsim** decides where tensors “live” and what happens when memory fill
 
 Code lives in `src/dmsim/policies/placement.py` and `src/dmsim/sim/engine.py`.
 
+**Line-by-line code walkthrough:** [PLACEMENT_CODE_WALKTHROUGH.md](PLACEMENT_CODE_WALKTHROUGH.md) (every line of `placement.py` annotated).
+
+**Trace replay walkthrough:** [TRACE_REPLAY_WALKTHROUGH.md](TRACE_REPLAY_WALKTHROUGH.md) (every line of `placement_replay.py` and `engine.py`).
+
 ---
 
 ## Two ideas to remember

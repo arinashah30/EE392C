@@ -56,6 +56,7 @@ Important top-level keys:
 
 | Key                          | Content                                                                     |
 | ---------------------------- | --------------------------------------------------------------------------- |
+| `neff_node`                  | **Static NEFF I/O catalog** — `variable_name` (`input0`, …), `shape`, `size` (bytes), `type` (`IN`/`OUT`/`WEIGHT`). Fed to `NeffTensorCatalog` / tensor mapper. See [TENSOR_MAPPER_AUDIT.md](../docs/TENSOR_MAPPER_AUDIT.md). |
 | `dma`                        | **Primary ingest source** — hundreds of thousands of DMA records            |
 | `layer_summary`              | Per-kernel/layer timing (`start`, `end`, `name`, FLOPs) → kernel boundaries |
 | `annotation`                 | Tensor Viewer warnings, e.g. `load_to_sbuf_dma_count`, `tensor_name`        |
@@ -78,6 +79,23 @@ Important top-level keys:
 ```
 
 **Timestamp unit:** microseconds relative to device profile start (converted to ns in ingest).
+
+### `neff_node` record shape (abbreviated)
+
+Each row is one **compiled graph slot** (whole-tensor geometry at the NEFF boundary — not kernel tile size, not DMA chunk size):
+
+```json
+{
+  "variable_name": "input36",
+  "shape": "[2048 512]",
+  "size": "2097152",
+  "type": "IN"
+}
+```
+
+**Viewing:** Neuron Explorer Tensor Viewer (`neuron-explorer view -d "$PROFILE"`), raw `jq` on device JSON, or `NeffTensorCatalog` for mapped semantic names — see [docs/TENSOR_MAPPER_AUDIT.md](../docs/TENSOR_MAPPER_AUDIT.md) §1 Tier C.
+
+**Ingest usage:** `build_catalog(device)` → mapper assigns semantic names/categories → trace `tensors[]` static bytes; unattributed decode DMA split by catalog category ratios (`hbm_traffic_*`).
 
 **Common routes in the example (nc0):**
 

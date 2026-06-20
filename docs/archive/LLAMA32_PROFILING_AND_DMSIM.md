@@ -366,9 +366,14 @@ Details: [NEURON_PROFILE.md](NEURON_PROFILE.md#dma-record-shape-abbreviated).
 
 ## Tensor mapper quirks (decode)
 
-- Decode NEFF uses shapes like `[1 2 256 64]` for many `input3+` slots; mapper expects prefill-style KV `[1 128 2 64]`, so early inputs may classify as `other` in the catalog.
-- Named weights in the catalog appear from ~`input19 `(`layer_0.attention.wq.weight`, etc.).
-- `cat.entries()[:20]` is string-sorted (`input10` before `input3`); sort numerically as above.
+`neff_node[]` slot shapes are the mapper ground truth (TP-sharded, fused, layout-transformed — **not** raw HF shapes). See [docs/TENSOR_MAPPER_AUDIT.md](../docs/TENSOR_MAPPER_AUDIT.md) §2 for HF vs NEFF equivalence.
+
+- Decode NEFF uses shapes like `[1 2 256 64]` for many `input3+` slots (**bhsd** KV layout); prefill-style `[1 128 2 64]` (**bshd**) is a different phase.
+- Named weights in the catalog appear from ~`input19` (`layer_0.attention.wq.weight`, etc.) when the mapper is correct.
+- `cat.entries()[:20]` is string-sorted (`input10` before `input3`); sort numerically as in the inspect snippet below.
+- **View slots:** raw `neff_node[]` in device JSON, Neuron Explorer Tensor Viewer, or `NeffTensorCatalog` (mapped). **Already used by:** `dmsim ingest` → trace tensor sizes/categories + proportional `hbm_traffic_*` for unknown DMA.
+
+**Full audit (mapper vs expected NEFF shapes, known bugs):** [docs/TENSOR_MAPPER_AUDIT.md](../docs/TENSOR_MAPPER_AUDIT.md). P0 issues: Llama decode can select `QwenMoENameMapper` (32 bhsd KV tensors); Llama KV loses layer index under `LLaMANameMapper`; Qwen expert 3D shapes swapped in `_map_moe_weight_shape`.
 
 ---
 

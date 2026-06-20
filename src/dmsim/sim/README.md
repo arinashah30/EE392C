@@ -16,7 +16,9 @@ Trace-driven analytical model for Trainium2 memory hierarchy studies. This packa
 | Policy YAML → model | [`config/loader.py`](../config/loader.py) `load_policy` |
 | Hierarchy YAML → model | [`config/loader.py`](../config/loader.py) `load_hierarchy` |
 | Resolved config types | [`config/models.py`](../config/models.py) |
-| Simulation engine | [`sim/engine.py`](engine.py), [`sim/transfer.py`](transfer.py), [`sim/residency.py`](residency.py) |
+| Simulation engine | [`sim/engine.py`](engine.py), [`sim/transfer.py`](transfer.py), [`sim/residency.py`](residency.py), [`sim/placement_replay.py`](placement_replay.py) |
+
+**Line-by-line replay walkthrough:** [docs/TRACE_REPLAY_WALKTHROUGH.md](../../../docs/TRACE_REPLAY_WALKTHROUGH.md) (`placement_replay.py` + `engine.py`, every line).
 
 Illustrative ids and sizes below are simplified.
 
